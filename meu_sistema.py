@@ -1,39 +1,28 @@
-import streamlit as st
-import pandas as pd
-from sqlalchemy import create_engine, text
-from datetime import datetime
-from fpdf import FPDF
-import io
-
-# --- 2. GESTÃO DO BANCO DE DADOS ---
 def conectar():
     if "database" in st.secrets:
-        db_url = st.secrets["database"]["url"]
-        db_url = db_url.strip() # Remove espaços invisíveis
+        db_url = st.secrets["database"]["url"].strip()
         if db_url.startswith("postgres://"):
             db_url = db_url.replace("postgres://", "postgresql://", 1)
-        # pool_pre_ping e connect_args garantem que a porta 6543 aceite a conexão
-        return create_engine(db_url, pool_pre_ping=True, connect_args={"sslmode": "require"})
+        # pool_pre_ping verifica se a conexão é real antes de tentar usar
+        return create_engine(db_url, pool_pre_ping=True, pool_recycle=300)
     else:
         return create_engine('sqlite:///compras_niyati.db')
 
 def inicializar_banco():
     engine = conectar()
-    with engine.connect() as conn:
-        # Forçamos o commit para garantir a criação das tabelas no banco vazio
+    # Usamos o comando 'begin' para garantir que as tabelas sejam criadas ou nada seja feito
+    with engine.begin() as conn:
         id_tipo = "SERIAL PRIMARY KEY" if engine.name == 'postgresql' else "INTEGER PRIMARY KEY AUTOINCREMENT"
         conn.execute(text(f'CREATE TABLE IF NOT EXISTS lojas (id {id_tipo}, nome TEXT)'))
         conn.execute(text(f'CREATE TABLE IF NOT EXISTS fornecedores (id {id_tipo}, nome TEXT)'))
         conn.execute(text(f'CREATE TABLE IF NOT EXISTS pedidos (id {id_tipo}, data TEXT, loja TEXT, fornecedor TEXT, itens TEXT, status TEXT)'))
         conn.execute(text(f'CREATE TABLE IF NOT EXISTS produtos (id {id_tipo}, nome TEXT)'))
-        conn.commit() 
         
-        # Verifica se precisa inserir dados iniciais nas tabelas recém-criadas
+        # Verifica se precisa de dados iniciais
         res = conn.execute(text('SELECT COUNT(*) FROM lojas')).fetchone()[0]
         if res == 0:
             conn.execute(text("INSERT INTO lojas (nome) VALUES ('Junqueirópolis'), ('Tupi Paulista'), ('Pres. Venceslau')"))
             conn.execute(text("INSERT INTO fornecedores (nome) VALUES ('Max Titanium'), ('Unilife'), ('Herbamed'), ('Flora Caps')"))
-        conn.commit()
 
 inicializar_banco()
 
@@ -256,6 +245,7 @@ elif st.session_state.menu_selecionado == "Config":
             if col2.button("X", key=f"f_{r['id']}"):
                 with engine.connect() as conn:
                     conn.execute(text("DELETE FROM fornecedores WHERE id=:id"), {"id": r['id']}); conn.commit(); st.rerun()
+
 
 
 
