@@ -1,3 +1,51 @@
+import streamlit as st
+from sqlalchemy import text
+
+# Função para verificar login
+def verificar_login(loja, senha):
+    conn = st.connection("postgresql", type="sql")
+    query = text("SELECT nivel_acesso FROM usuarios WHERE nome_loja = :loja AND senha = :senha")
+    resultado = conn.query(query, params={"loja": loja, "senha": senha})
+    return resultado
+
+# Inicializa o estado de login
+if 'logado' not in st.session_state:
+    st.session_state.logado = False
+    st.session_state.nivel = None
+    st.session_state.loja_atual = None
+
+if not st.session_state.logado:
+    st.title("🔑 Login - Sistema Niyati")
+    usuario = st.text_input("Nome da Loja")
+    senha = st.text_input("Senha", type="password")
+    
+    if st.button("Entrar"):
+        check = verificar_login(usuario, senha)
+        if not check.empty:
+            st.session_state.logado = True
+            st.session_state.nivel = check.iloc[0]['nivel_acesso']
+            st.session_state.loja_atual = usuario
+            st.rerun()
+        else:
+            st.error("Usuário ou senha incorretos")
+else:
+    # --- LOGADO COM SUCESSO ---
+    st.sidebar.write(f"Conectado: **{st.session_state.loja_atual}**")
+    
+    # Controle de Abas por Nível
+    opcoes_menu = ["Lista de Pedidos"]
+    
+    if st.session_state.nivel == 'admin':
+        opcoes_menu += ["Gerenciamento", "Gerar Pedidos", "Produtos", "Configurações"]
+    
+    escolha = st.sidebar.radio("Navegação", opcoes_menu)
+    
+    if st.sidebar.button("Sair"):
+        st.session_state.logado = False
+        st.rerun()
+
+    # Chame suas funções de interface aqui dependendo da 'escolha'
+
 import streamlit as st  # <-- ESSA LINHA RESOLVE O NAMEERROR
 import pandas as pd
 from sqlalchemy import create_engine, text
@@ -251,6 +299,7 @@ elif st.session_state.menu_selecionado == "Config":
             if col2.button("X", key=f"f_{r['id']}"):
                 with engine.connect() as conn:
                     conn.execute(text("DELETE FROM fornecedores WHERE id=:id"), {"id": r['id']}); conn.commit(); st.rerun()
+
 
 
 
