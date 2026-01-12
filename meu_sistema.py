@@ -5,21 +5,35 @@ from datetime import datetime
 from fpdf import FPDF
 import io
 
-# --- 1. CONEXÃO LIMPA ---
+# --- 1. CONEXÃO INTELIGENTE (RESOLVE KEYERROR E PREPARE_THRESHOLD) ---
 def conectar():
-    url = st.secrets["database"]["url"].strip()
-    if "?" in url:
-        url = url.split("?")[0]
+    # Tenta ler do formato que você configurou
+    if "connections" in st.secrets and "postgresql" in st.secrets["connections"]:
+        url = st.secrets["connections"]["postgresql"]["url"]
+    elif "database" in st.secrets:
+        url = st.secrets["database"]["url"]
+    else:
+        st.error("ERRO: Configuração de banco de dados não encontrada nos Secrets!")
+        st.stop()
+
+    # Limpeza automática da URL para evitar erros de conexão
+    url = url.strip()
+    if "prepare_threshold" in url:
+        url = url.split("?")[0] + "?sslmode=require"
+    
     if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql://", 1)
-    return create_engine(f"{url}?sslmode=require", pool_pre_ping=True)
+    
+    return create_engine(url, pool_pre_ping=True)
 
 # --- 2. LOGIN ---
 def verificar_login(loja, senha):
     engine = conectar()
     with engine.connect() as conn:
+        # Consulta usando parâmetros para evitar erro de 'UnhashableParam'
         query = text("SELECT nivel_acesso FROM usuarios WHERE nome_loja = :loja AND senha = :senha")
-        return conn.execute(query, {"loja": loja, "senha": senha}).fetchone()
+        res = conn.execute(query, {"loja": loja, "senha": senha}).fetchone()
+        return res
 
 if 'logado' not in st.session_state:
     st.session_state.update({'logado': False, 'nivel': None, 'loja_atual': None, 'menu': "Pedidos"})
@@ -37,7 +51,7 @@ if not st.session_state.logado:
             st.error("Usuário ou senha incorretos")
     st.stop()
 
-# --- 3. INICIALIZAR TABELAS ---
+# --- 3. INICIALIZAÇÃO E TELAS ---
 engine = conectar()
 with engine.begin() as conn:
     conn.execute(text("CREATE TABLE IF NOT EXISTS lojas (id SERIAL PRIMARY KEY, nome TEXT)"))
@@ -45,7 +59,6 @@ with engine.begin() as conn:
     conn.execute(text("CREATE TABLE IF NOT EXISTS produtos (id SERIAL PRIMARY KEY, nome TEXT)"))
     conn.execute(text("CREATE TABLE IF NOT EXISTS pedidos (id SERIAL PRIMARY KEY, data TEXT, loja TEXT, fornecedor TEXT, itens TEXT, status TEXT DEFAULT 'Enviado')"))
 
-# --- 4. INTERFACE ---
 st.sidebar.title("NIYATI")
 st.sidebar.write(f"Conectado: **{st.session_state.loja_atual}**")
 
@@ -58,7 +71,7 @@ if st.sidebar.button("Sair"):
     st.session_state.logado = False
     st.rerun()
 
-# --- TELAS ---
+# --- LÓGICA DAS TELAS (IGUAL AO ANTERIOR) ---
 if st.session_state.menu == "Pedidos":
     st.header("🛒 Novo Pedido")
     with engine.connect() as conn:
@@ -88,7 +101,7 @@ if st.session_state.menu == "Pedidos":
         st.session_state[key_c] = []; st.success("Pedido Enviado!"); st.rerun()
 
 elif st.session_state.menu == "ADM":
-    st.header("⚙️ Área Administrativa")
+    st.header("⚙️ Gerenciamento")
     t1, t2 = st.tabs(["⏳ Pendentes", "✅ Atendidos"])
     with t1:
         df_p = pd.read_sql(text("SELECT * FROM pedidos WHERE status != 'Atendido' ORDER BY id DESC"), engine)
@@ -97,7 +110,7 @@ elif st.session_state.menu == "ADM":
             for _, r in df_p.iterrows():
                 if st.checkbox(f"Pedido #{r['id']} - {r['loja']} ({r['fornecedor']})", key=f"p_{r['id']}"):
                     sel_ids.append(r['id'])
-                st.write(f"Items: {r['itens']}")
+                st.write(f"Itens: {r['itens']}")
             if sel_ids and st.button("✔️ Marcar Atendidos"):
                 with engine.begin() as conn:
                     conn.execute(text("UPDATE pedidos SET status = 'Atendido' WHERE id IN :ids"), {"ids": tuple(sel_ids)})
