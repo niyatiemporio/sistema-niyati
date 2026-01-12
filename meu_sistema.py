@@ -8,34 +8,25 @@ import io
 # --- 1. CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="SISTEMA NIYATI", layout="wide", initial_sidebar_state="expanded")
 
-# --- 2. GESTÃO DO BANCO DE DADOS (NUVEM + LOCAL) ---
+# --- 2. GESTÃO DO BANCO DE DADOS ---
 def conectar():
-    # Se houver configuração nos Secrets do Streamlit, usa o Supabase
     if "database" in st.secrets:
         db_url = st.secrets["database"]["url"]
-        # Corrige o protocolo para compatibilidade com SQLAlchemy
         if db_url.startswith("postgres://"):
             db_url = db_url.replace("postgres://", "postgresql://", 1)
         return create_engine(db_url, pool_pre_ping=True)
     else:
-        # Senão, usa o arquivo SQLite local para testes no PC
         return create_engine('sqlite:///compras_niyati.db')
 
 def inicializar_banco():
     engine = conectar()
     with engine.connect() as conn:
-        # SQL compatível com SERIAL (Postgres) e INTEGER PRIMARY KEY (SQLite)
-        if engine.name == 'postgresql':
-            id_tipo = "SERIAL PRIMARY KEY"
-        else:
-            id_tipo = "INTEGER PRIMARY KEY AUTOINCREMENT"
-
+        id_tipo = "SERIAL PRIMARY KEY" if engine.name == 'postgresql' else "INTEGER PRIMARY KEY AUTOINCREMENT"
         conn.execute(text(f'CREATE TABLE IF NOT EXISTS lojas (id {id_tipo}, nome TEXT)'))
         conn.execute(text(f'CREATE TABLE IF NOT EXISTS fornecedores (id {id_tipo}, nome TEXT)'))
         conn.execute(text(f'CREATE TABLE IF NOT EXISTS pedidos (id {id_tipo}, data TEXT, loja TEXT, fornecedor TEXT, itens TEXT, status TEXT)'))
         conn.execute(text(f'CREATE TABLE IF NOT EXISTS produtos (id {id_tipo}, nome TEXT)'))
         
-        # Inserção de dados iniciais
         res = conn.execute(text('SELECT COUNT(*) FROM lojas')).fetchone()[0]
         if res == 0:
             conn.execute(text("INSERT INTO lojas (nome) VALUES ('Junqueirópolis'), ('Tupi Paulista'), ('Pres. Venceslau')"))
@@ -103,7 +94,7 @@ if st.session_state.menu_selecionado == "Lojas":
     tabs = st.tabs(lojas_db)
     for i, nome_loja in enumerate(lojas_db):
         with tabs[i]:
-            guia = st.radio("Selecione a operação:", ["Novo Pedido", "Histórico"], key=f"guia_{nome_loja}", horizontal=True)
+            guia = st.radio("Ação", ["Novo Pedido", "Histórico"], key=f"guia_{nome_loja}", horizontal=True)
             if guia == "Novo Pedido":
                 with engine.connect() as conn:
                     forns = [r[0] for r in conn.execute(text('SELECT nome FROM fornecedores')).fetchall()]
@@ -136,7 +127,7 @@ if st.session_state.menu_selecionado == "Lojas":
                 df_h = pd.read_sql(text(f"SELECT * FROM pedidos WHERE loja = '{nome_loja}' ORDER BY id DESC"), engine)
                 for _, row in df_h.iterrows():
                     with st.expander(f"Pedido #{row['id']} - {row['fornecedor']} ({row['data']})"):
-                        st.write("**Conteúdo:**", row['itens'])
+                        st.write(row['itens'])
                         if st.button(f"✏️ Editar #{row['id']}", key=f"re_{row['id']}"):
                             k_re = f"car_{nome_loja}_{row['fornecedor']}"
                             if k_re not in st.session_state: st.session_state[k_re] = []
@@ -147,7 +138,7 @@ if st.session_state.menu_selecionado == "Lojas":
                                 conn.execute(text("DELETE FROM pedidos WHERE id=:id"), {"id": row['id']}); conn.commit()
                             st.rerun()
 
-# --- 6. TELA: ADM (CONTROLE TOTAL) ---
+# --- 6. TELA: ADM ---
 elif st.session_state.menu_selecionado == "ADM":
     st.header("⚙️ GERENCIAMENTO DE PEDIDOS (ADM)")
     df_adm = pd.read_sql(text("SELECT * FROM pedidos ORDER BY id DESC"), engine)
@@ -205,7 +196,7 @@ elif st.session_state.menu_selecionado == "ADM":
                             txt_novo = ", ".join(itens_atuais)
                             with engine.connect() as conn:
                                 conn.execute(text("UPDATE pedidos SET itens = :i WHERE id = :id"), {"i": txt_novo, "id": r_adm['id']}); conn.commit(); st.rerun()
-                        if c_dl.button("🗑️ Deletar Pedido", key=f"dl_{r_adm['id']}"):
+                        if c_dl.button("Deletar Pedido", key=f"dl_{r_adm['id']}"):
                             with engine.connect() as conn:
                                 conn.execute(text("DELETE FROM pedidos WHERE id=:id"), {"id": r_adm['id']}); conn.commit(); st.rerun()
     else: st.info("Vazio.")
@@ -242,7 +233,7 @@ elif st.session_state.menu_selecionado == "Config":
     st.header("🛠️ CONFIGURAÇÕES")
     c1, c2 = st.columns(2)
     with c1:
-        st.subheader("Gerenciar Lojas")
+        st.subheader("Lojas")
         nl = st.text_input("Nova Loja")
         if st.button("Add Loja") and nl:
             with engine.connect() as conn:
@@ -253,7 +244,7 @@ elif st.session_state.menu_selecionado == "Config":
                 with engine.connect() as conn:
                     conn.execute(text("DELETE FROM lojas WHERE id=:id"), {"id": r['id']}); conn.commit(); st.rerun()
     with c2:
-        st.subheader("Gerenciar Fornecedores")
+        st.subheader("Fornecedores")
         nf = st.text_input("Novo Forn")
         if st.button("Add Forn") and nf:
             with engine.connect() as conn:
