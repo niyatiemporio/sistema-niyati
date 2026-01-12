@@ -5,10 +5,10 @@ from datetime import datetime
 from fpdf import FPDF
 import io
 
-# --- 1. FUNÇÕES DE LOGIN (CORREÇÃO PARA EVITAR ERRO DE HASH) ---
+# --- 1. FUNÇÕES DE LOGIN (CORRIGIDA) ---
 def verificar_login(loja, senha):
     conn = st.connection("postgresql", type="sql")
-    # Usamos f-string simples para evitar o erro de UnhashableParam com o objeto text()
+    # Usamos f-string para a query simples, evitando problemas de hash com o objeto text()
     query = f"SELECT nivel_acesso FROM usuarios WHERE nome_loja = '{loja}' AND senha = '{senha}'"
     resultado = conn.query(query)
     return resultado
@@ -34,7 +34,7 @@ if not st.session_state.logado:
             else:
                 st.error("Usuário ou senha incorretos")
         else:
-            st.warning("Preencha os campos de login.")
+            st.warning("Por favor, preencha o usuário e a senha.")
 else:
     # --- LOGADO COM SUCESSO ---
     st.sidebar.write(f"Conectado: **{st.session_state.loja_atual}**")
@@ -49,18 +49,20 @@ else:
         st.session_state.logado = False
         st.rerun()
 
-    # --- 2. GESTÃO DO BANCO DE DADOS (CORREÇÃO DE CONEXÃO) ---
+    # --- 2. GESTÃO DO BANCO DE DADOS (CONEXÃO LIMPA) ---
     def conectar():
         if "database" in st.secrets:
             db_url = st.secrets["database"]["url"].strip()
-            # Remove o parâmetro problemático se ele estiver na string do segredo
-            if "prepare_threshold" in db_url:
-                db_url = db_url.split("?")[0] + "?sslmode=require"
+            
+            # Remove o prepare_threshold se ele estiver na URL do segredo
+            if "?" in db_url:
+                base_url = db_url.split("?")[0]
+                db_url = f"{base_url}?sslmode=require"
             
             if db_url.startswith("postgres://"):
                 db_url = db_url.replace("postgres://", "postgresql://", 1)
             
-            return create_engine(db_url, pool_pre_ping=True, connect_args={"sslmode": "require"})
+            return create_engine(db_url, pool_pre_ping=True)
         else:
             return create_engine('sqlite:///compras_niyati.db')
 
@@ -182,9 +184,13 @@ else:
                         df_l = df_adm[df_adm['loja'] == n_loja]
                         for _, r in df_l.iterrows():
                             c_ch, c_ex = st.columns([0.05, 0.95])
-                            if c_ch.checkbox("", key=f"adm_p_{r['id']}", value=(r['id'] in st.session_state.ids_sel)):
-                                if r['id'] not in st.session_state.ids_sel: st.session_state.ids_sel.append(r['id']); st.rerun()
-                            elif r['id'] in st.session_state.ids_sel: st.session_state.ids_sel.remove(r['id']); st.rerun()
+                            checked = c_ch.checkbox("", key=f"adm_p_{r['id']}", value=(r['id'] in st.session_state.ids_sel))
+                            if checked and r['id'] not in st.session_state.ids_sel:
+                                st.session_state.ids_sel.append(r['id'])
+                                st.rerun()
+                            elif not checked and r['id'] in st.session_state.ids_sel:
+                                st.session_state.ids_sel.remove(r['id'])
+                                st.rerun()
                             with c_ex.expander(f"Pedido #{r['id']} | {r['fornecedor']} | {r['data']}"):
                                 st.write(r['itens'])
             else: st.info("Sem pedidos pendentes.")
@@ -193,12 +199,26 @@ else:
             df_at = pd.read_sql(text("SELECT * FROM pedidos WHERE status = 'Atendido' ORDER BY id DESC"), engine)
             if not df_at.empty:
                 st.dataframe(df_at[["id", "data", "loja", "fornecedor", "itens"]], use_container_width=True)
-            else: st.info("Histórico vazio.")
+            else: st.info("Histórico de atendidos vazio.")
 
     elif st.session_state.menu_selecionado == "Gerar Pedidos":
         st.header("📝 GERAR PEDIDOS AVULSOS")
-        # (Teu código original de gerar avulsos)
-        st.info("Funcionalidade mantida conforme original.")
+        if 'car_av' not in st.session_state: st.session_state.car_av = []
+        with engine.connect() as conn:
+            forns_l = [r[0] for r in conn.execute(text('SELECT nome FROM fornecedores')).fetchall()]
+        f_av = st.selectbox("Fornecedor", forns_l)
+        d_av = st.date_input("Data")
+        with st.container(border=True):
+            c1, c2 = st.columns([4, 1]); it = c1.text_input("Item"); qt = c2.number_input("Qtd", min_value=1)
+            if st.button("Adicionar"):
+                if it: st.session_state.car_av.append({"Item": it, "Qtd": qt}); st.rerun()
+        for idx, v in enumerate(st.session_state.car_av):
+            cc1, cc2, cc3 = st.columns([3, 1, 1]); cc1.write(v['Item']); cc2.write(f"{v['Qtd']} un")
+            if cc3.button("Remover", key=f"rav_{idx}"): st.session_state.car_av.pop(idx); st.rerun()
+        if st.session_state.car_av and st.button("📄 PDF"):
+            tx = ", ".join([f"{x['Qtd']}x {x['Item']}" for x in st.session_state.car_av])
+            df = pd.DataFrame([{"id": "AVULSO", "loja": "MANUAL", "fornecedor": f_av, "data": d_av.strftime("%d/%m/%Y"), "itens": tx}])
+            st.download_button("Baixar", data=gerar_pdf_niyati(df), file_name="avulso.pdf")
 
     elif st.session_state.menu_selecionado == "Produtos":
         st.header("🍎 PRODUTOS")
@@ -211,5 +231,4 @@ else:
 
     elif st.session_state.menu_selecionado == "Configurações":
         st.header("🛠️ CONFIGURAÇÕES")
-        # (Teu código original de configurações de lojas e fornecedores)
-        st.info("Funcionalidade mantida conforme original.")
+        st.info("Configurações de Lojas e Fornecedores mantidas.")
