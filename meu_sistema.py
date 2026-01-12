@@ -5,11 +5,12 @@ from datetime import datetime
 from fpdf import FPDF
 import io
 
-# --- 1. FUNÇÕES DE LOGIN ---
+# --- 1. FUNÇÕES DE LOGIN (CORRIGIDA PARA EVITAR UNHASHABLE PARAM ERROR) ---
 def verificar_login(loja, senha):
+    # Usamos o st.connection mas sem passar o objeto 'text()' diretamente para evitar erro de hash
     conn = st.connection("postgresql", type="sql")
-    query = text("SELECT nivel_acesso FROM usuarios WHERE nome_loja = :loja AND senha = :senha")
-    resultado = conn.query(query, params={"loja": loja, "senha": senha})
+    # Passamos a query como string pura, o Streamlit tratará internamente
+    resultado = conn.query(f"SELECT nivel_acesso FROM usuarios WHERE nome_loja = '{loja}' AND senha = '{senha}'")
     return resultado
 
 if 'logado' not in st.session_state:
@@ -23,14 +24,17 @@ if not st.session_state.logado:
     senha = st.text_input("Senha", type="password")
     
     if st.button("Entrar"):
-        check = verificar_login(usuario, senha)
-        if not check.empty:
-            st.session_state.logado = True
-            st.session_state.nivel = check.iloc[0]['nivel_acesso']
-            st.session_state.loja_atual = usuario
-            st.rerun()
+        if usuario and senha:
+            check = verificar_login(usuario, senha)
+            if not check.empty:
+                st.session_state.logado = True
+                st.session_state.nivel = check.iloc[0]['nivel_acesso']
+                st.session_state.loja_atual = usuario
+                st.rerun()
+            else:
+                st.error("Usuário ou senha incorretos")
         else:
-            st.error("Usuário ou senha incorretos")
+            st.warning("Preencha todos os campos")
 else:
     # --- LOGADO COM SUCESSO ---
     st.sidebar.write(f"Conectado: **{st.session_state.loja_atual}**")
@@ -61,7 +65,7 @@ else:
             id_tipo = "SERIAL PRIMARY KEY" if engine.name == 'postgresql' else "INTEGER PRIMARY KEY AUTOINCREMENT"
             conn.execute(text(f'CREATE TABLE IF NOT EXISTS lojas (id {id_tipo}, nome TEXT)'))
             conn.execute(text(f'CREATE TABLE IF NOT EXISTS fornecedores (id {id_tipo}, nome TEXT)'))
-            # Adicionado o status DEFAULT 'Enviado' para novos pedidos
+            # Garante que a coluna status existe
             conn.execute(text(f'CREATE TABLE IF NOT EXISTS pedidos (id {id_tipo}, data TEXT, loja TEXT, fornecedor TEXT, itens TEXT, status TEXT DEFAULT "Enviado")'))
             conn.execute(text(f'CREATE TABLE IF NOT EXISTS produtos (id {id_tipo}, nome TEXT)'))
             
@@ -72,6 +76,7 @@ else:
 
     inicializar_banco()
 
+    # --- 3. FUNÇÕES DE EXPORTAÇÃO ---
     def gerar_pdf_niyati(dados_df):
         pdf = FPDF()
         pdf.set_auto_page_break(auto=True, margin=15)
@@ -108,26 +113,22 @@ else:
         with pd.ExcelWriter(output, engine='openpyxl') as writer: df_excel.to_excel(writer, index=False)
         return output.getvalue()
 
+    # --- 4. NAVEGAÇÃO ---
     if 'menu_selecionado' not in st.session_state: st.session_state.menu_selecionado = "Lojas"
     def navegar(destino): st.session_state.menu_selecionado = destino
 
     st.sidebar.markdown("<h2 style='text-align: center; color: #007bff;'>SISTEMA NIYATI</h2>", unsafe_allow_html=True)
     st.sidebar.divider()
     
-    # BOTOES ORIGINAIS
-    st.sidebar.button("🛒 LISTA DE PEDIDOS", on_click=navegar, args=("Lojas",), use_container_width=True, type="primary" if st.session_state.menu_selecionado == "Lojas" else "secondary")
-    st.sidebar.button("⚙️ GERENCIAMENTO (ADM)", on_click=navegar, args=("ADM",), use_container_width=True, type="primary" if st.session_state.menu_selecionado == "ADM" else "secondary")
-    st.sidebar.button("📝 GERAR PEDIDOS (AVULSO)", on_click=navegar, args=("Gerar",), use_container_width=True, type="primary" if st.session_state.menu_selecionado == "Gerar" else "secondary")
-    st.sidebar.button("🍎 PRODUTOS", on_click=navegar, args=("Produtos",), use_container_width=True, type="primary" if st.session_state.menu_selecionado == "Produtos" else "secondary")
-    st.sidebar.button("🛠️ CONFIGURAÇÕES", on_click=navegar, args=("Config",), use_container_width=True, type="primary" if st.session_state.menu_selecionado == "Config" else "secondary")
+    # Sincronização da escolha do radio com o estado
+    st.session_state.menu_selecionado = escolha
 
     engine = conectar()
 
     # --- 5. TELA: LOJAS ---
-    if st.session_state.menu_selecionado == "Lojas":
+    if st.session_state.menu_selecionado == "Lista de Pedidos":
         st.header("🛒 LISTA DE PEDIDOS DE COMPRA")
         with engine.connect() as conn:
-            # FILTRO POR LOJA: Se for admin vê tudo, se não, só a dele
             if st.session_state.nivel == 'admin':
                 lojas_db = [r[0] for r in conn.execute(text('SELECT nome FROM lojas')).fetchall()]
             else:
@@ -181,7 +182,7 @@ else:
                                 st.rerun()
 
     # --- 6. TELA: ADM (AJUSTADA PARA PENDENTE/ATENDIDO) ---
-    elif st.session_state.menu_selecionado == "ADM":
+    elif st.session_state.menu_selecionado == "Gerenciamento":
         st.header("⚙️ GERENCIAMENTO DE PEDIDOS (ADM)")
         
         tab_pendentes, tab_atendidos = st.tabs(["⏳ Pendentes", "✅ Atendidos"])
@@ -196,7 +197,6 @@ else:
                     df_sel = df_adm[df_adm['id'].isin(st.session_state.ids_sel)]
                     c1.download_button("📄 PDF", data=gerar_pdf_niyati(df_sel), file_name="pedidos.pdf", use_container_width=True)
                     
-                    # BOTÃO ATENDER
                     if c2.button("✔️ MARCAR COMO ATENDIDO", type="primary", use_container_width=True):
                         with engine.connect() as conn:
                             conn.execute(text("UPDATE pedidos SET status = 'Atendido' WHERE id IN :ids"), {"ids": tuple(st.session_state.ids_sel)})
@@ -225,9 +225,16 @@ else:
 
         with tab_atendidos:
             df_atendido = pd.read_sql(text("SELECT * FROM pedidos WHERE status = 'Atendido' ORDER BY id DESC"), engine)
-            st.dataframe(df_atendido, use_container_width=True)
+            if not df_atendido.empty:
+                st.dataframe(df_atendido, use_container_width=True)
+                if st.button("Limpar Histórico de Atendidos"):
+                    with engine.connect() as conn:
+                        conn.execute(text("DELETE FROM pedidos WHERE status = 'Atendido'"))
+                        conn.commit()
+                    st.rerun()
+            else: st.info("Histórico vazio.")
 
-    elif st.session_state.menu_selecionado == "Gerar":
+    elif st.session_state.menu_selecionado == "Gerar Pedidos":
         st.header("📝 GERAR PEDIDOS AVULSOS")
         if 'car_av' not in st.session_state: st.session_state.car_av = []
         with engine.connect() as conn:
@@ -254,7 +261,7 @@ else:
                 conn.execute(text("INSERT INTO produtos (nome) VALUES (:n)"), {"n": np}); conn.commit(); st.rerun()
         st.dataframe(pd.read_sql(text("SELECT * FROM produtos ORDER BY nome"), engine), use_container_width=True)
 
-    elif st.session_state.menu_selecionado == "Config":
+    elif st.session_state.menu_selecionado == "Configurações":
         st.header("🛠️ CONFIGURAÇÕES")
         c1, c2 = st.columns(2)
         with c1:
