@@ -12,6 +12,7 @@ st.set_page_config(page_title="SISTEMA NIYATI", layout="wide", initial_sidebar_s
 def conectar():
     if "database" in st.secrets:
         db_url = st.secrets["database"]["url"]
+        # Esta linha abaixo é essencial para converter a URL do Supabase para o SQLAlchemy
         if db_url.startswith("postgres://"):
             db_url = db_url.replace("postgres://", "postgresql://", 1)
         return create_engine(db_url, pool_pre_ping=True)
@@ -254,3 +255,4 @@ elif st.session_state.menu_selecionado == "Config":
             if col2.button("X", key=f"f_{r['id']}"):
                 with engine.connect() as conn:
                     conn.execute(text("DELETE FROM fornecedores WHERE id=:id"), {"id": r['id']}); conn.commit(); st.rerun()
+
