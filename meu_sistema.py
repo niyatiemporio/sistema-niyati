@@ -10,15 +10,14 @@ st.set_page_config(page_title="SISTEMA NIYATI", layout="wide", initial_sidebar_s
 
 # --- 2. GESTÃO DO BANCO DE DADOS (NUVEM + LOCAL) ---
 def conectar():
-    # Procura a URL nos Secrets do Streamlit (para quando estiver online)
+    # Se estiver no Streamlit Cloud, ele lê dos Secrets. Se for no PC, usa o arquivo local.
     if "database" in st.secrets:
         db_url = st.secrets["database"]["url"]
-        # Ajuste técnico para o protocolo PostgreSQL
         if db_url.startswith("postgres://"):
             db_url = db_url.replace("postgres://", "postgresql://", 1)
-        return create_engine(db_url)
+        # Adicionamos pool_pre_ping para evitar quedas de conexão na nuvem
+        return create_engine(db_url, pool_pre_ping=True)
     else:
-        # Se não achar a nuvem, usa o banco local no seu PC
         return create_engine('sqlite:///compras_niyati.db')
 
 def inicializar_banco():
@@ -257,4 +256,5 @@ elif st.session_state.menu_selecionado == "Config":
             col1, col2 = st.columns([3, 1]); col1.write(r['nome'])
             if col2.button("X", key=f"f_{r['id']}"):
                 with engine.connect() as conn:
+
                     conn.execute(text("DELETE FROM fornecedores WHERE id=:id"), {"id": r['id']}); conn.commit(); st.rerun()
