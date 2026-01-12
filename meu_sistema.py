@@ -8,20 +8,32 @@ import io
 # --- 1. CONFIGURAÇÃO ---
 st.set_page_config(page_title="Sistema Niyati", layout="wide")
 
-# --- 2. CONEXÃO (VOLTANDO AO QUE FUNCIONOU) ---
+# --- 2. CONEXÃO CORRIGIDA (PEGA AUTOMATICAMENTE DO SEU FORMATO) ---
 def conectar():
-    # Puxa a URL direto do segredo, garantindo que não tenha espaços extras
-    db_url = st.secrets["database"]["url"].strip()
-    # Corrige o prefixo para o SQLAlchemy se necessário
-    if db_url.startswith("postgres://"):
-        db_url = db_url.replace("postgres://", "postgresql://", 1)
+    # Tenta pegar do formato [connections.postgresql] (padrão Streamlit)
+    if "connections" in st.secrets and "postgresql" in st.secrets["connections"]:
+        # Se você configurou como url = "..." dentro de [connections.postgresql]
+        if "url" in st.secrets["connections"]["postgresql"]:
+            url = st.secrets["connections"]["postgresql"]["url"]
+        else:
+            # Se você usou o formato de campos separados (host, port, etc)
+            c = st.secrets["connections"]["postgresql"]
+            url = f"postgresql://{c['username']}:{c['password']}@{c['host']}:{c['port']}/{c['database']}"
     
-    # Criando o motor de conexão com os parâmetros que resolvem o erro de SSL/Porta 6543
-    return create_engine(
-        db_url, 
-        pool_pre_ping=True, 
-        connect_args={"sslmode": "require"}
-    )
+    # Tenta pegar do seu formato antigo [database] se o de cima falhar
+    elif "database" in st.secrets:
+        url = st.secrets["database"]["url"]
+    else:
+        st.error("Erro: Credenciais do banco de dados não encontradas nos Secrets!")
+        st.stop()
+
+    url = url.strip()
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+    
+    return create_engine(url, pool_pre_ping=True, connect_args={"sslmode": "require"})
+
+# --- O RESTANTE DO CÓDIGO SEGUE IGUAL AO ANTERIOR ---
 
 def inicializar_banco():
     engine = conectar()
@@ -175,3 +187,4 @@ elif st.session_state.menu == "Config":
         if st.button("Add Forn") and nf:
             with engine.begin() as conn: conn.execute(text("INSERT INTO fornecedores (nome) VALUES (:n)"), {"n": nf})
             st.rerun()
+
