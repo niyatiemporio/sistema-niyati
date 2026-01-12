@@ -10,26 +10,32 @@ st.set_page_config(page_title="SISTEMA NIYATI", layout="wide", initial_sidebar_s
 
 # --- 2. GESTÃO DO BANCO DE DADOS (NUVEM + LOCAL) ---
 def conectar():
-    # Se estiver no Streamlit Cloud, ele lê dos Secrets. Se for no PC, usa o arquivo local.
+    # Se houver configuração nos Secrets do Streamlit, usa o Supabase
     if "database" in st.secrets:
         db_url = st.secrets["database"]["url"]
+        # Corrige o protocolo para compatibilidade com SQLAlchemy
         if db_url.startswith("postgres://"):
             db_url = db_url.replace("postgres://", "postgresql://", 1)
-        # Adicionamos pool_pre_ping para evitar quedas de conexão na nuvem
         return create_engine(db_url, pool_pre_ping=True)
     else:
+        # Senão, usa o arquivo SQLite local para testes no PC
         return create_engine('sqlite:///compras_niyati.db')
 
 def inicializar_banco():
     engine = conectar()
     with engine.connect() as conn:
-        # Criação de tabelas com tipos compatíveis (SERIAL para Nuvem)
-        conn.execute(text('CREATE TABLE IF NOT EXISTS lojas (id SERIAL PRIMARY KEY, nome TEXT)'))
-        conn.execute(text('CREATE TABLE IF NOT EXISTS fornecedores (id SERIAL PRIMARY KEY, nome TEXT)'))
-        conn.execute(text('CREATE TABLE IF NOT EXISTS pedidos (id SERIAL PRIMARY KEY, data TEXT, loja TEXT, fornecedor TEXT, itens TEXT, status TEXT)'))
-        conn.execute(text('CREATE TABLE IF NOT EXISTS produtos (id SERIAL PRIMARY KEY, nome TEXT)'))
+        # SQL compatível com SERIAL (Postgres) e INTEGER PRIMARY KEY (SQLite)
+        if engine.name == 'postgresql':
+            id_tipo = "SERIAL PRIMARY KEY"
+        else:
+            id_tipo = "INTEGER PRIMARY KEY AUTOINCREMENT"
+
+        conn.execute(text(f'CREATE TABLE IF NOT EXISTS lojas (id {id_tipo}, nome TEXT)'))
+        conn.execute(text(f'CREATE TABLE IF NOT EXISTS fornecedores (id {id_tipo}, nome TEXT)'))
+        conn.execute(text(f'CREATE TABLE IF NOT EXISTS pedidos (id {id_tipo}, data TEXT, loja TEXT, fornecedor TEXT, itens TEXT, status TEXT)'))
+        conn.execute(text(f'CREATE TABLE IF NOT EXISTS produtos (id {id_tipo}, nome TEXT)'))
         
-        # Dados iniciais
+        # Inserção de dados iniciais
         res = conn.execute(text('SELECT COUNT(*) FROM lojas')).fetchone()[0]
         if res == 0:
             conn.execute(text("INSERT INTO lojas (nome) VALUES ('Junqueirópolis'), ('Tupi Paulista'), ('Pres. Venceslau')"))
@@ -69,13 +75,13 @@ def gerar_excel_niyati(dados_df):
             try:
                 q_v, n_v = item.split("x ", 1)
                 rows.append({"ID Pedido": row['id'], "Data": row['data'], "Loja": row['loja'], "Fornecedor": row['fornecedor'], "Quantidade": q_v, "Produto": n_v})
-            except: rows.append({"ID Pedido": row['id'], "Data": row['data'], "Loja": row['loja'], "Fornecedor": row['fornecedor'], "Quantidade": "N/A", "Produto": item})
+            except: rows.append({"ID Pedido": row['id'], "Data": row['data'], "Loja": row['loja'], "Fornecedor": row['fornecedor'], "Quantidade": "1", "Produto": item})
     df_excel = pd.DataFrame(rows)
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer: df_excel.to_excel(writer, index=False)
     return output.getvalue()
 
-# --- 4. CONTROLE DE NAVEGAÇÃO ---
+# --- 4. NAVEGAÇÃO ---
 if 'menu_selecionado' not in st.session_state: st.session_state.menu_selecionado = "Lojas"
 def navegar(destino): st.session_state.menu_selecionado = destino
 
@@ -110,7 +116,7 @@ if st.session_state.menu_selecionado == "Lojas":
                         with engine.connect() as conn:
                             conn.execute(text("INSERT INTO fornecedores (nome) VALUES (:n)"), {"n": nf}); conn.commit()
                         st.session_state[f'pop_{nome_loja}'] = False; st.rerun()
-                key_c = f"carrinho_{nome_loja}_{f_sel}"
+                key_c = f"car_{nome_loja}_{f_sel}"
                 if key_c not in st.session_state: st.session_state[key_c] = []
                 with st.container(border=True):
                     cp, cq = st.columns([4, 1]); it = cp.text_input("Produto", key=f"it_{nome_loja}"); qt = cq.number_input("Qtd", min_value=1, key=f"qt_{nome_loja}")
@@ -132,7 +138,7 @@ if st.session_state.menu_selecionado == "Lojas":
                     with st.expander(f"Pedido #{row['id']} - {row['fornecedor']} ({row['data']})"):
                         st.write("**Conteúdo:**", row['itens'])
                         if st.button(f"✏️ Editar #{row['id']}", key=f"re_{row['id']}"):
-                            k_re = f"carrinho_{nome_loja}_{row['fornecedor']}"
+                            k_re = f"car_{nome_loja}_{row['fornecedor']}"
                             if k_re not in st.session_state: st.session_state[k_re] = []
                             for i_s in row['itens'].split(", "):
                                 try: qv, nv = i_s.split("x ", 1); st.session_state[k_re].append({"Item": nv, "Qtd": int(qv)})
@@ -247,7 +253,7 @@ elif st.session_state.menu_selecionado == "Config":
                 with engine.connect() as conn:
                     conn.execute(text("DELETE FROM lojas WHERE id=:id"), {"id": r['id']}); conn.commit(); st.rerun()
     with c2:
-        st.subheader("Fornecedores")
+        st.subheader("Gerenciar Fornecedores")
         nf = st.text_input("Novo Forn")
         if st.button("Add Forn") and nf:
             with engine.connect() as conn:
@@ -256,5 +262,4 @@ elif st.session_state.menu_selecionado == "Config":
             col1, col2 = st.columns([3, 1]); col1.write(r['nome'])
             if col2.button("X", key=f"f_{r['id']}"):
                 with engine.connect() as conn:
-
                     conn.execute(text("DELETE FROM fornecedores WHERE id=:id"), {"id": r['id']}); conn.commit(); st.rerun()
