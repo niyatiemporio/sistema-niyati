@@ -10,17 +10,10 @@ st.set_page_config(page_title="SISTEMA NIYATI", layout="wide")
 
 @st.cache_resource
 def get_engine():
-    if "connections" in st.secrets and "postgresql" in st.secrets["connections"]:
-        url = st.secrets["connections"]["postgresql"]["url"]
-    elif "database" in st.secrets:
-        url = st.secrets["database"]["url"]
-    else:
-        st.error("Configuração de banco não encontrada!")
-        st.stop()
+    url = st.secrets["connections"]["postgresql"]["url"] if "connections" in st.secrets else st.secrets["database"]["url"]
     url = url.strip().split("?")[0]
-    if url.startswith("postgres://"):
-        url = url.replace("postgres://", "postgresql://", 1)
-    return create_engine(f"{url}?sslmode=require", pool_size=10, max_overflow=20)
+    if url.startswith("postgres://"): url = url.replace("postgres://", "postgresql://", 1)
+    return create_engine(f"{url}?sslmode=require", pool_size=20, max_overflow=0)
 
 engine = get_engine()
 
@@ -30,7 +23,7 @@ if 'logado' not in st.session_state:
 
 if not st.session_state.logado:
     st.title("🔑 Login - Sistema Niyati")
-    u = st.text_input("Usuário")
+    u = st.text_input("Usuário (Nome da Loja, ex: JUNQUEIRÓPOLIS)")
     s = st.text_input("Senha", type="password")
     if st.button("Entrar", type="primary"):
         with engine.connect() as conn:
@@ -45,7 +38,7 @@ if not st.session_state.logado:
 def navegar(destino): st.session_state.menu = destino
 
 st.sidebar.markdown(f"<h2 style='text-align: center; color: #007bff;'>NIYATI</h2>", unsafe_allow_html=True)
-st.sidebar.write(f"Conectado: **{st.session_state.loja_atual}**")
+st.sidebar.write(f"Loja: **{st.session_state.loja_atual}**")
 st.sidebar.divider()
 
 st.sidebar.button("🛒 LISTA DE PEDIDOS", on_click=navegar, args=("Lojas",), use_container_width=True)
@@ -61,107 +54,112 @@ if st.sidebar.button("🚪 Sair", use_container_width=True):
 # --- 4. TELAS ---
 
 if st.session_state.menu == "Lojas":
-    st.header("🛒 Pedidos")
+    st.header(f"🛒 Pedidos - {st.session_state.loja_atual}")
     with engine.connect() as conn:
-        lojas = [r[0] for r in conn.execute(text('SELECT nome FROM lojas ORDER BY nome')).fetchall()] if st.session_state.nivel == 'admin' else [st.session_state.loja_atual]
+        forns = [r[0] for r in conn.execute(text('SELECT nome FROM fornecedores ORDER BY nome')).fetchall()]
+        prods = [r[0] for r in conn.execute(text('SELECT nome FROM produtos ORDER BY nome')).fetchall()]
+
+    guia = st.radio("Ação", ["Novo Pedido", "Histórico"], horizontal=True)
     
-    tabs = st.tabs(lojas) if lojas else [st.container()]
-    for i, nome_l in enumerate(lojas):
-        with tabs[i]:
-            guia = st.radio("Ação", ["Novo Pedido", "Histórico"], key=f"guia_{nome_l}", horizontal=True)
-            if guia == "Novo Pedido":
-                with engine.connect() as conn:
-                    forns = [r[0] for r in conn.execute(text('SELECT nome FROM fornecedores ORDER BY nome')).fetchall()]
-                    prods = [r[0] for r in conn.execute(text('SELECT nome FROM produtos ORDER BY nome')).fetchall()]
+    if guia == "Novo Pedido":
+        col_f, col_manage_f = st.columns([3, 1])
+        f_sel = col_f.selectbox("Fornecedor", forns)
+        if col_manage_f.button("➕/➖ Fornecedores"):
+            st.session_state.show_f = not st.session_state.get('show_f', False)
 
-                c_f, c_add_f = st.columns([3, 1])
-                f_sel = c_f.selectbox("Fornecedor", forns, key=f"f_{nome_l}")
-                if c_add_f.button("➕/➖ Fornecedores", key=f"manage_f_{nome_l}"):
-                    st.session_state[f'pop_{nome_l}'] = not st.session_state.get(f'pop_{nome_l}', False)
-
-                if st.session_state.get(f'pop_{nome_l}'):
-                    with st.expander("Gerenciar Fornecedores", expanded=True):
-                        nf = st.text_input("Novo Fornecedor", key=f"inf_{nome_l}")
-                        if st.button("Gravar", key=f"svf_{nome_l}"):
-                            with engine.begin() as conn: conn.execute(text("INSERT INTO fornecedores (nome) VALUES (:n)"), {"n": nf})
-                            st.rerun()
-                        for f in forns:
-                            col_n, col_d = st.columns([4, 1])
-                            col_n.write(f)
-                            if col_d.button("X", key=f"df_{nome_l}_{f}"):
-                                with engine.begin() as conn: conn.execute(text("DELETE FROM fornecedores WHERE nome=:n"), {"n": f})
-                                st.rerun()
-
-                key_c = f"car_{nome_l}_{f_sel}"
-                if key_c not in st.session_state: st.session_state[key_c] = []
-
-                with st.container(border=True):
-                    # CAMPO ÚNICO INTELIGENTE (DATALIST)
-                    st.write("Descrição do Produto")
-                    produto_final = st.selectbox("Selecione da lista ou comece a digitar para filtrar", [""] + prods, key=f"sel_{nome_l}", help="Para itens novos, cadastre em 'Produtos' no menu lateral ou digite aqui")
-                    
-                    # Se não estiver na lista, o sistema aceita o que foi digitado na busca do selectbox
-                    # Nota: O selectbox do Streamlit permite busca, mas para itens TOTALMENTE novos o ideal é o Admin cadastrar em 'Produtos' ou usamos um text_input alternativo. 
-                    # Para manter o campo ÚNICO e aceitar novos, usamos o text_input com as sugestões como legenda:
-                    
-                    it_final = st.text_input("Digite o produto (Sugestões: " + ", ".join(prods[:5]) + "...)", key=f"it_man_{nome_l}")
-                    qt = st.number_input("Qtd", min_value=1, key=f"qt_{nome_l}")
-                    
-                    if st.button("Adicionar Linha", key=f"add_{nome_l}"):
-                        p_nome = it_final if it_final else produto_final
-                        if p_nome: 
-                            st.session_state[key_c].append(f"{qt}x {p_nome}")
-                            st.rerun()
-
-                for idx, v in enumerate(st.session_state[key_c]):
+        if st.session_state.get('show_f'):
+            with st.expander("Gerenciar Fornecedores", expanded=True):
+                nf = st.text_input("Novo Fornecedor")
+                if st.button("Gravar Forn"):
+                    with engine.begin() as conn: conn.execute(text("INSERT INTO fornecedores (nome) VALUES (:n)"), {"n": nf})
+                    st.rerun()
+                for f in forns:
                     c1, c2 = st.columns([4, 1])
-                    c1.write(v)
-                    if c2.button("❌", key=f"del_{nome_l}_{idx}"): 
-                        st.session_state[key_c].pop(idx); st.rerun()
-                
-                if st.session_state[key_c] and st.button("🚀 ENVIAR PEDIDO", key=f"env_{nome_l}", type="primary"):
-                    with engine.begin() as conn:
-                        conn.execute(text("INSERT INTO pedidos (data, loja, fornecedor, itens) VALUES (:d,:l,:f,:i)"),
-                                     {"d": datetime.now().strftime("%d/%m/%Y"), "l": nome_l, "f": f_sel, "i": ", ".join(st.session_state[key_c])})
-                    st.session_state[key_c] = []; st.success("Pedido Enviado!"); st.rerun()
-            else:
-                df_h = pd.read_sql(text(f"SELECT * FROM pedidos WHERE loja = '{nome_l}' ORDER BY id DESC"), engine)
-                st.dataframe(df_h, use_container_width=True)
+                    c1.write(f); 
+                    if c2.button("X", key=f"del_f_{f}"):
+                        with engine.begin() as conn: conn.execute(text("DELETE FROM fornecedores WHERE nome=:n"), {"n": f})
+                        st.rerun()
+
+        key_c = f"car_{st.session_state.loja_atual}_{f_sel}"
+        if key_c not in st.session_state: st.session_state[key_c] = []
+
+        with st.container(border=True):
+            st.write("### Adicionar Item")
+            # --- CAMPO ÚNICO INTELIGENTE ---
+            # O multiselect permite digitar e criar novos itens se não existirem
+            p_input = st.multiselect("Produto (Selecione ou digite um novo)", options=prods, max_selections=1, help="Comece a digitar. Se não existir, o sistema aceitará o que você escreveu.")
+            
+            # Pega o que foi escrito mesmo que não esteja na lista
+            produto_final = p_input[0] if p_input else ""
+            
+            qt = st.number_input("Quantidade", min_value=1, step=1)
+            if st.button("➕ Adicionar Linha", type="secondary"):
+                if produto_final:
+                    st.session_state[key_c].append(f"{qt}x {produto_final}")
+                    st.rerun()
+
+        for idx, v in enumerate(st.session_state[key_c]):
+            c1, c2 = st.columns([4, 1])
+            c1.info(v)
+            if c2.button("❌", key=f"del_it_{idx}"): st.session_state[key_c].pop(idx); st.rerun()
+        
+        if st.session_state[key_c] and st.button("🚀 ENVIAR PEDIDO", type="primary"):
+            with engine.begin() as conn:
+                conn.execute(text("INSERT INTO pedidos (data, loja, fornecedor, itens) VALUES (:d,:l,:f,:i)"),
+                             {"d": datetime.now().strftime("%d/%m/%Y"), "l": st.session_state.loja_atual, "f": f_sel, "i": ", ".join(st.session_state[key_c])})
+            st.session_state[key_c] = []; st.success("Sucesso!"); st.rerun()
+    else:
+        df_h = pd.read_sql(text(f"SELECT * FROM pedidos WHERE loja = '{st.session_state.loja_atual}' ORDER BY id DESC"), engine)
+        st.dataframe(df_h, use_container_width=True)
 
 elif st.session_state.menu == "Config":
     st.header("🛠️ Configurações")
-    t1, t2 = st.tabs(["Gerenciar Lojas", "Gerenciar Logins"])
+    t1, t2 = st.tabs(["Lojas", "Logins"])
     
     with t1:
-        nl = st.text_input("Nova Loja")
-        if st.button("Adicionar Loja") and nl:
+        nl = st.text_input("Cadastrar Nome da Loja")
+        if st.button("Salvar Loja") and nl:
             with engine.begin() as conn: conn.execute(text("INSERT INTO lojas (nome) VALUES (:n)"), {"n": nl})
             st.rerun()
         for _, r in pd.read_sql(text("SELECT * FROM lojas"), engine).iterrows():
             c1, c2 = st.columns([4, 1])
             c1.write(r['nome'])
-            if c2.button("Excluir", key=f"dl_loja_{r['id']}"):
+            if c2.button("X", key=f"dl_loja_{r['id']}"):
                 with engine.begin() as conn: conn.execute(text("DELETE FROM lojas WHERE id=:id"), {"id": r['id']})
                 st.rerun()
 
     with t2:
-        st.subheader("Controle de Acessos")
-        with st.form("novo_login"):
-            ul = st.text_input("Nome da Loja (Login)")
-            us = st.text_input("Senha")
-            un = st.selectbox("Nível", ["vendedor", "admin"])
-            if st.form_submit_button("Criar Usuário"):
+        with st.form("add_user"):
+            st.subheader("Criar Acesso")
+            ul = st.selectbox("Vincular à Loja", [r[0] for r in engine.connect().execute(text("SELECT nome FROM lojas")).fetchall()] + ["ADMIN"])
+            us = st.text_input("Definir Senha")
+            un = st.selectbox("Tipo", ["vendedor", "admin"])
+            if st.form_submit_button("Gerar Login"):
                 with engine.begin() as conn: conn.execute(text("INSERT INTO usuarios (nome_loja, senha, nivel_acesso) VALUES (:n, :s, :a)"), {"n": ul, "s": us, "a": un})
                 st.rerun()
         
-        usuarios = pd.read_sql(text("SELECT * FROM usuarios"), engine)
-        for _, r in usuarios.iterrows():
-            with st.expander(f"👤 {r['nome_loja']} ({r['nivel_acesso']})"):
-                nova_senha = st.text_input("Nova Senha", key=f"pw_{r['id']}")
+        st.subheader("Gerenciar Acessos Existentes")
+        for _, r in pd.read_sql(text("SELECT * FROM usuarios"), engine).iterrows():
+            with st.expander(f"Login: {r['nome_loja']}"):
+                ns = st.text_input("Trocar Senha", key=f"ns_{r['id']}")
                 c1, c2 = st.columns(2)
-                if c1.button("Salvar Senha", key=f"sv_pw_{r['id']}"):
-                    with engine.begin() as conn: conn.execute(text("UPDATE usuarios SET senha=:s WHERE id=:id"), {"s": nova_senha, "id": r['id']})
-                    st.success("Alterado!")
-                if c2.button("Excluir Login", key=f"del_us_{r['id']}"):
+                if c1.button("Salvar", key=f"s_{r['id']}"):
+                    with engine.begin() as conn: conn.execute(text("UPDATE usuarios SET senha=:s WHERE id=:id"), {"s": ns, "id": r['id']})
+                    st.success("Ok!")
+                if c2.button("Excluir", key=f"e_{r['id']}"):
                     with engine.begin() as conn: conn.execute(text("DELETE FROM usuarios WHERE id=:id"), {"id": r['id']})
                     st.rerun()
+
+elif st.session_state.menu == "ADM":
+    st.header("⚙️ Gerenciamento ADM")
+    df_p = pd.read_sql(text("SELECT * FROM pedidos WHERE status != 'Atendido' ORDER BY id DESC"), engine)
+    for _, r in df_p.iterrows():
+        with st.expander(f"Pedido #{r['id']} - {r['loja']} - {r['fornecedor']}"):
+            txt_edit = st.text_area("Itens", r['itens'], key=f"ed_{r['id']}")
+            c1, c2 = st.columns(2)
+            if c1.button("Salvar Edição", key=f"sv_{r['id']}"):
+                with engine.begin() as conn: conn.execute(text("UPDATE pedidos SET itens=:i WHERE id=:id"), {"i": txt_edit, "id": r['id']})
+                st.rerun()
+            if c2.button("Finalizar/Atendido", key=f"at_{r['id']}"):
+                with engine.begin() as conn: conn.execute(text("UPDATE pedidos SET status='Atendido' WHERE id=:id"), {"id": r['id']})
+                st.rerun()
