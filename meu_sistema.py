@@ -5,10 +5,10 @@ from datetime import datetime
 from fpdf import FPDF
 import io
 
-# --- 1. FUNÇÕES DE LOGIN (CORRIGIDA) ---
+# --- 1. FUNÇÕES DE LOGIN ---
 def verificar_login(loja, senha):
+    # Usamos o método mais simples para evitar erros de processamento do Streamlit
     conn = st.connection("postgresql", type="sql")
-    # Usamos f-string para a query simples, evitando problemas de hash com o objeto text()
     query = f"SELECT nivel_acesso FROM usuarios WHERE nome_loja = '{loja}' AND senha = '{senha}'"
     resultado = conn.query(query)
     return resultado
@@ -33,8 +33,6 @@ if not st.session_state.logado:
                 st.rerun()
             else:
                 st.error("Usuário ou senha incorretos")
-        else:
-            st.warning("Por favor, preencha o usuário e a senha.")
 else:
     # --- LOGADO COM SUCESSO ---
     st.sidebar.write(f"Conectado: **{st.session_state.loja_atual}**")
@@ -49,20 +47,20 @@ else:
         st.session_state.logado = False
         st.rerun()
 
-    # --- 2. GESTÃO DO BANCO DE DADOS (CONEXÃO LIMPA) ---
+    # --- 2. GESTÃO DO BANCO DE DADOS (CONEXÃO SIMPLIFICADA SEM ERROS) ---
     def conectar():
         if "database" in st.secrets:
             db_url = st.secrets["database"]["url"].strip()
             
-            # Remove o prepare_threshold se ele estiver na URL do segredo
+            # Limpa a URL de parâmetros que causam erro no Streamlit Cloud
             if "?" in db_url:
-                base_url = db_url.split("?")[0]
-                db_url = f"{base_url}?sslmode=require"
+                db_url = db_url.split("?")[0]
             
             if db_url.startswith("postgres://"):
                 db_url = db_url.replace("postgres://", "postgresql://", 1)
             
-            return create_engine(db_url, pool_pre_ping=True)
+            # Conexão básica e segura
+            return create_engine(db_url, pool_pre_ping=True, connect_args={"sslmode": "require"})
         else:
             return create_engine('sqlite:///compras_niyati.db')
 
@@ -74,11 +72,6 @@ else:
             conn.execute(text(f'CREATE TABLE IF NOT EXISTS fornecedores (id {id_tipo}, nome TEXT)'))
             conn.execute(text(f'CREATE TABLE IF NOT EXISTS pedidos (id {id_tipo}, data TEXT, loja TEXT, fornecedor TEXT, itens TEXT, status TEXT DEFAULT "Enviado")'))
             conn.execute(text(f'CREATE TABLE IF NOT EXISTS produtos (id {id_tipo}, nome TEXT)'))
-            
-            res = conn.execute(text('SELECT COUNT(*) FROM lojas')).fetchone()[0]
-            if res == 0:
-                conn.execute(text("INSERT INTO lojas (nome) VALUES ('Junqueirópolis'), ('Tupi Paulista'), ('Pres. Venceslau')"))
-                conn.execute(text("INSERT INTO fornecedores (nome) VALUES ('Max Titanium'), ('Unilife'), ('Herbamed'), ('Flora Caps')"))
 
     inicializar_banco()
     engine = conectar()
@@ -107,18 +100,15 @@ else:
                 except: pdf.cell(190, 8, txt=item, border=1); pdf.ln()
         return pdf.output(dest='S').encode('latin-1')
 
-    # --- 4. NAVEGAÇÃO ---
-    st.session_state.menu_selecionado = escolha
-
-    # --- 5. TELA: LOJAS ---
-    if st.session_state.menu_selecionado == "Lista de Pedidos":
-        st.header("🛒 LISTA DE PEDIDOS DE COMPRA")
+    # --- 4. TELA: LOJAS ---
+    if escolha == "Lista de Pedidos":
+        st.header("🛒 LISTA DE PEDIDOS")
         with engine.connect() as conn:
             if st.session_state.nivel == 'admin':
                 lojas_db = [r[0] for r in conn.execute(text('SELECT nome FROM lojas')).fetchall()]
             else:
                 lojas_db = [st.session_state.loja_atual]
-                
+        
         tabs = st.tabs(lojas_db)
         for i, nome_loja in enumerate(lojas_db):
             with tabs[i]:
@@ -126,30 +116,29 @@ else:
                 if guia == "Novo Pedido":
                     with engine.connect() as conn:
                         forns = [r[0] for r in conn.execute(text('SELECT nome FROM fornecedores')).fetchall()]
-                    c1, c2 = st.columns([3, 1])
-                    f_sel = c1.selectbox("Fornecedor", forns, key=f"f_{nome_loja}")
-                    if c2.button("➕ Novo Forn.", key=f"af_{nome_loja}"): st.session_state[f'pop_{nome_loja}'] = True
-                    if st.session_state.get(f'pop_{nome_loja}'):
-                        nf = st.text_input("Nome:", key=f"inf_{nome_loja}")
-                        if st.button("Gravar", key=f"svf_{nome_loja}"):
-                            with engine.connect() as conn:
-                                conn.execute(text("INSERT INTO fornecedores (nome) VALUES (:n)"), {"n": nf}); conn.commit()
-                            st.session_state[f'pop_{nome_loja}'] = False; st.rerun()
+                    f_sel = st.selectbox("Fornecedor", forns, key=f"f_{nome_loja}")
+                    
                     key_c = f"car_{nome_loja}_{f_sel}"
                     if key_c not in st.session_state: st.session_state[key_c] = []
+                    
                     with st.container(border=True):
-                        cp, cq = st.columns([4, 1]); it = cp.text_input("Produto", key=f"it_{nome_loja}"); qt = cq.number_input("Qtd", min_value=1, key=f"qt_{nome_loja}")
-                        if st.button("Adicionar Linha", key=f"add_{nome_loja}"):
+                        cp, cq = st.columns([4, 1])
+                        it = cp.text_input("Produto", key=f"it_{nome_loja}")
+                        qt = cq.number_input("Qtd", min_value=1, key=f"qt_{nome_loja}")
+                        if st.button("Adicionar", key=f"add_{nome_loja}"):
                             if it: st.session_state[key_c].append({"Item": it, "Qtd": qt}); st.rerun()
+                    
                     for idx, v in enumerate(st.session_state[key_c]):
-                        cc1, cc2, cc3 = st.columns([3, 1, 1]); st.session_state[key_c][idx]['Item'] = cc1.text_input(f"Item {idx}", v['Item'], key=f"ed_{nome_loja}_{idx}"); cc2.write(f"{v['Qtd']} un")
+                        cc1, cc2, cc3 = st.columns([3, 1, 1])
+                        cc1.write(v['Item'])
+                        cc2.write(f"{v['Qtd']} un")
                         if cc3.button("❌", key=f"del_{nome_loja}_{idx}"): st.session_state[key_c].pop(idx); st.rerun()
-                    if st.session_state[key_c] and st.button("🚀 ENVIAR PEDIDO FINAL", type="primary", key=f"env_{nome_loja}"):
+                        
+                    if st.session_state[key_c] and st.button("🚀 ENVIAR PEDIDO", type="primary", key=f"env_{nome_loja}"):
                         txt = ", ".join([f"{x['Qtd']}x {x['Item']}" for x in st.session_state[key_c]])
-                        with engine.connect() as conn:
-                            conn.execute(text('INSERT INTO pedidos (data, loja, fornecedor, itens, status) VALUES (:d,:l,:f,:i,:s)'), 
-                                         {"d": datetime.now().strftime("%d/%m/%Y %H:%M"), "l": nome_loja, "f": f_sel, "i": txt, "s": "Enviado"})
-                            conn.commit()
+                        with engine.begin() as conn:
+                            conn.execute(text('INSERT INTO pedidos (data, loja, fornecedor, itens, status) VALUES (:d,:l,:f,:i,"Enviado")'), 
+                                         {"d": datetime.now().strftime("%d/%m/%Y %H:%M"), "l": nome_loja, "f": f_sel, "i": txt})
                         st.session_state[key_c] = []; st.success("Enviado!"); st.rerun()
                 else:
                     df_h = pd.read_sql(text(f"SELECT * FROM pedidos WHERE loja = '{nome_loja}' ORDER BY id DESC"), engine)
@@ -157,78 +146,48 @@ else:
                         with st.expander(f"Pedido #{row['id']} - {row['fornecedor']} ({row['data']})"):
                             st.write(row['itens'])
 
-    # --- 6. TELA: ADM (PENDENTES E ATENDIDOS) ---
-    elif st.session_state.menu_selecionado == "Gerenciamento":
-        st.header("⚙️ GERENCIAMENTO DE PEDIDOS (ADM)")
+    # --- 5. TELA: GERENCIAMENTO (ADM) ---
+    elif escolha == "Gerenciamento":
+        st.header("⚙️ GERENCIAMENTO")
         tab_p, tab_a = st.tabs(["⏳ Pendentes", "✅ Atendidos"])
         
         with tab_p:
             df_adm = pd.read_sql(text("SELECT * FROM pedidos WHERE status != 'Atendido' OR status IS NULL ORDER BY id DESC"), engine)
             if not df_adm.empty:
                 if 'ids_sel' not in st.session_state: st.session_state.ids_sel = []
-                c1, c2, c3 = st.columns(3)
+                
+                c1, c2 = st.columns(2)
                 if st.session_state.ids_sel:
                     df_sel = df_adm[df_adm['id'].isin(st.session_state.ids_sel)]
-                    c1.download_button("📄 PDF", data=gerar_pdf_niyati(df_sel), file_name="pedidos.pdf")
-                    if c2.button("✔️ MARCAR ATENDIDO", type="primary"):
+                    c1.download_button("📄 Gerar PDF", data=gerar_pdf_niyati(df_sel), file_name="pedidos.pdf")
+                    if c2.button("✔️ MARCAR COMO ATENDIDO", type="primary"):
                         with engine.begin() as conn:
                             conn.execute(text("UPDATE pedidos SET status = 'Atendido' WHERE id IN :ids"), {"ids": tuple(st.session_state.ids_sel)})
                         st.session_state.ids_sel = []; st.rerun()
-                    if c3.button("Limpar Seleção"): st.session_state.ids_sel = []; st.rerun()
 
-                with engine.connect() as conn:
-                    lojas_adm = [r[0] for r in conn.execute(text('SELECT nome FROM lojas')).fetchall()]
-                t_lojas = st.tabs(lojas_adm)
-                for idx, n_loja in enumerate(lojas_adm):
-                    with t_lojas[idx]:
-                        df_l = df_adm[df_adm['loja'] == n_loja]
-                        for _, r in df_l.iterrows():
-                            c_ch, c_ex = st.columns([0.05, 0.95])
-                            checked = c_ch.checkbox("", key=f"adm_p_{r['id']}", value=(r['id'] in st.session_state.ids_sel))
-                            if checked and r['id'] not in st.session_state.ids_sel:
-                                st.session_state.ids_sel.append(r['id'])
-                                st.rerun()
-                            elif not checked and r['id'] in st.session_state.ids_sel:
-                                st.session_state.ids_sel.remove(r['id'])
-                                st.rerun()
-                            with c_ex.expander(f"Pedido #{r['id']} | {r['fornecedor']} | {r['data']}"):
-                                st.write(r['itens'])
-            else: st.info("Sem pedidos pendentes.")
+                for _, r in df_adm.iterrows():
+                    c_ch, c_ex = st.columns([0.1, 0.9])
+                    if c_ch.checkbox("", key=f"chk_{r['id']}", value=(r['id'] in st.session_state.ids_sel)):
+                        if r['id'] not in st.session_state.ids_sel: st.session_state.ids_sel.append(r['id']); st.rerun()
+                    elif r['id'] in st.session_state.ids_sel: st.session_state.ids_sel.remove(r['id']); st.rerun()
+                    
+                    with c_ex.expander(f"Pedido #{r['id']} - {r['loja']} - {r['fornecedor']}"):
+                        st.write(r['itens'])
+            else: st.info("Sem pendências.")
 
         with tab_a:
             df_at = pd.read_sql(text("SELECT * FROM pedidos WHERE status = 'Atendido' ORDER BY id DESC"), engine)
-            if not df_at.empty:
-                st.dataframe(df_at[["id", "data", "loja", "fornecedor", "itens"]], use_container_width=True)
-            else: st.info("Histórico de atendidos vazio.")
+            st.dataframe(df_at, use_container_width=True)
 
-    elif st.session_state.menu_selecionado == "Gerar Pedidos":
-        st.header("📝 GERAR PEDIDOS AVULSOS")
-        if 'car_av' not in st.session_state: st.session_state.car_av = []
-        with engine.connect() as conn:
-            forns_l = [r[0] for r in conn.execute(text('SELECT nome FROM fornecedores')).fetchall()]
-        f_av = st.selectbox("Fornecedor", forns_l)
-        d_av = st.date_input("Data")
-        with st.container(border=True):
-            c1, c2 = st.columns([4, 1]); it = c1.text_input("Item"); qt = c2.number_input("Qtd", min_value=1)
-            if st.button("Adicionar"):
-                if it: st.session_state.car_av.append({"Item": it, "Qtd": qt}); st.rerun()
-        for idx, v in enumerate(st.session_state.car_av):
-            cc1, cc2, cc3 = st.columns([3, 1, 1]); cc1.write(v['Item']); cc2.write(f"{v['Qtd']} un")
-            if cc3.button("Remover", key=f"rav_{idx}"): st.session_state.car_av.pop(idx); st.rerun()
-        if st.session_state.car_av and st.button("📄 PDF"):
-            tx = ", ".join([f"{x['Qtd']}x {x['Item']}" for x in st.session_state.car_av])
-            df = pd.DataFrame([{"id": "AVULSO", "loja": "MANUAL", "fornecedor": f_av, "data": d_av.strftime("%d/%m/%Y"), "itens": tx}])
-            st.download_button("Baixar", data=gerar_pdf_niyati(df), file_name="avulso.pdf")
-
-    elif st.session_state.menu_selecionado == "Produtos":
+    # --- 6. PRODUTOS E CONFIG (MANTIDOS) ---
+    elif escolha == "Produtos":
         st.header("🍎 PRODUTOS")
-        np = st.text_input("Novo:")
+        np = st.text_input("Novo Produto")
         if st.button("Salvar") and np:
-            with engine.begin() as conn:
-                conn.execute(text("INSERT INTO produtos (nome) VALUES (:n)"), {"n": np})
+            with engine.begin() as conn: conn.execute(text("INSERT INTO produtos (nome) VALUES (:n)"), {"n": np})
             st.rerun()
         st.dataframe(pd.read_sql(text("SELECT * FROM produtos ORDER BY nome"), engine), use_container_width=True)
 
-    elif st.session_state.menu_selecionado == "Configurações":
+    elif escolha == "Configurações":
         st.header("🛠️ CONFIGURAÇÕES")
-        st.info("Configurações de Lojas e Fornecedores mantidas.")
+        st.info("Aqui você gerencia lojas e fornecedores.")
