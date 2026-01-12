@@ -21,6 +21,7 @@ if not st.session_state.logado:
     st.title("🔑 Login - Sistema Niyati")
     usuario = st.text_input("Nome da Loja")
     senha = st.text_input("Senha", type="password")
+    
     if st.button("Entrar"):
         check = verificar_login(usuario, senha)
         if not check.empty:
@@ -31,41 +32,45 @@ if not st.session_state.logado:
         else:
             st.error("Usuário ou senha incorretos")
 else:
+    # --- LOGADO COM SUCESSO ---
     st.sidebar.write(f"Conectado: **{st.session_state.loja_atual}**")
+    
     opcoes_menu = ["Lista de Pedidos"]
     if st.session_state.nivel == 'admin':
         opcoes_menu += ["Gerenciamento", "Gerar Pedidos", "Produtos", "Configurações"]
+    
     escolha = st.sidebar.radio("Navegação", opcoes_menu)
+    
     if st.sidebar.button("Sair"):
         st.session_state.logado = False
         st.rerun()
 
-# --- 2. GESTÃO DO BANCO DE DADOS ---
-def conectar():
-    if "database" in st.secrets:
-        db_url = st.secrets["database"]["url"].strip()
-        if db_url.startswith("postgres://"):
-            db_url = db_url.replace("postgres://", "postgresql://", 1)
-        return create_engine(db_url, pool_pre_ping=True, connect_args={"sslmode": "require"})
-    else:
-        return create_engine('sqlite:///compras_niyati.db')
+    # --- 2. GESTÃO DO BANCO DE DADOS ---
+    def conectar():
+        if "database" in st.secrets:
+            db_url = st.secrets["database"]["url"].strip()
+            if db_url.startswith("postgres://"):
+                db_url = db_url.replace("postgres://", "postgresql://", 1)
+            return create_engine(db_url, pool_pre_ping=True, connect_args={"sslmode": "require"})
+        else:
+            return create_engine('sqlite:///compras_niyati.db')
 
-def inicializar_banco():
-    engine = conectar()
-    with engine.begin() as conn:
-        id_tipo = "SERIAL PRIMARY KEY" if engine.name == 'postgresql' else "INTEGER PRIMARY KEY AUTOINCREMENT"
-        conn.execute(text(f'CREATE TABLE IF NOT EXISTS lojas (id {id_tipo}, nome TEXT)'))
-        conn.execute(text(f'CREATE TABLE IF NOT EXISTS fornecedores (id {id_tipo}, nome TEXT)'))
-        conn.execute(text(f'CREATE TABLE IF NOT EXISTS pedidos (id {id_tipo}, data TEXT, loja TEXT, fornecedor TEXT, itens TEXT, status TEXT DEFAULT "Enviado")'))
-        conn.execute(text(f'CREATE TABLE IF NOT EXISTS produtos (id {id_tipo}, nome TEXT)'))
-        res = conn.execute(text('SELECT COUNT(*) FROM lojas')).fetchone()[0]
-        if res == 0:
-            conn.execute(text("INSERT INTO lojas (nome) VALUES ('Junqueirópolis'), ('Tupi Paulista'), ('Pres. Venceslau')"))
-            conn.execute(text("INSERT INTO fornecedores (nome) VALUES ('Max Titanium'), ('Unilife'), ('Herbamed'), ('Flora Caps')"))
+    def inicializar_banco():
+        engine = conectar()
+        with engine.begin() as conn:
+            id_tipo = "SERIAL PRIMARY KEY" if engine.name == 'postgresql' else "INTEGER PRIMARY KEY AUTOINCREMENT"
+            conn.execute(text(f'CREATE TABLE IF NOT EXISTS lojas (id {id_tipo}, nome TEXT)'))
+            conn.execute(text(f'CREATE TABLE IF NOT EXISTS fornecedores (id {id_tipo}, nome TEXT)'))
+            # Adicionado o status DEFAULT 'Enviado' para novos pedidos
+            conn.execute(text(f'CREATE TABLE IF NOT EXISTS pedidos (id {id_tipo}, data TEXT, loja TEXT, fornecedor TEXT, itens TEXT, status TEXT DEFAULT "Enviado")'))
+            conn.execute(text(f'CREATE TABLE IF NOT EXISTS produtos (id {id_tipo}, nome TEXT)'))
+            
+            res = conn.execute(text('SELECT COUNT(*) FROM lojas')).fetchone()[0]
+            if res == 0:
+                conn.execute(text("INSERT INTO lojas (nome) VALUES ('Junqueirópolis'), ('Tupi Paulista'), ('Pres. Venceslau')"))
+                conn.execute(text("INSERT INTO fornecedores (nome) VALUES ('Max Titanium'), ('Unilife'), ('Herbamed'), ('Flora Caps')"))
 
-if st.session_state.logado:
     inicializar_banco()
-    engine = conectar()
 
     def gerar_pdf_niyati(dados_df):
         pdf = FPDF()
@@ -103,18 +108,31 @@ if st.session_state.logado:
         with pd.ExcelWriter(output, engine='openpyxl') as writer: df_excel.to_excel(writer, index=False)
         return output.getvalue()
 
+    if 'menu_selecionado' not in st.session_state: st.session_state.menu_selecionado = "Lojas"
+    def navegar(destino): st.session_state.menu_selecionado = destino
+
     st.sidebar.markdown("<h2 style='text-align: center; color: #007bff;'>SISTEMA NIYATI</h2>", unsafe_allow_html=True)
     st.sidebar.divider()
-    st.session_state.menu_selecionado = escolha
+    
+    # BOTOES ORIGINAIS
+    st.sidebar.button("🛒 LISTA DE PEDIDOS", on_click=navegar, args=("Lojas",), use_container_width=True, type="primary" if st.session_state.menu_selecionado == "Lojas" else "secondary")
+    st.sidebar.button("⚙️ GERENCIAMENTO (ADM)", on_click=navegar, args=("ADM",), use_container_width=True, type="primary" if st.session_state.menu_selecionado == "ADM" else "secondary")
+    st.sidebar.button("📝 GERAR PEDIDOS (AVULSO)", on_click=navegar, args=("Gerar",), use_container_width=True, type="primary" if st.session_state.menu_selecionado == "Gerar" else "secondary")
+    st.sidebar.button("🍎 PRODUTOS", on_click=navegar, args=("Produtos",), use_container_width=True, type="primary" if st.session_state.menu_selecionado == "Produtos" else "secondary")
+    st.sidebar.button("🛠️ CONFIGURAÇÕES", on_click=navegar, args=("Config",), use_container_width=True, type="primary" if st.session_state.menu_selecionado == "Config" else "secondary")
+
+    engine = conectar()
 
     # --- 5. TELA: LOJAS ---
-    if st.session_state.menu_selecionado == "Lista de Pedidos":
+    if st.session_state.menu_selecionado == "Lojas":
         st.header("🛒 LISTA DE PEDIDOS DE COMPRA")
         with engine.connect() as conn:
+            # FILTRO POR LOJA: Se for admin vê tudo, se não, só a dele
             if st.session_state.nivel == 'admin':
                 lojas_db = [r[0] for r in conn.execute(text('SELECT nome FROM lojas')).fetchall()]
             else:
                 lojas_db = [st.session_state.loja_atual]
+                
         tabs = st.tabs(lojas_db)
         for i, nome_loja in enumerate(lojas_db):
             with tabs[i]:
@@ -150,29 +168,44 @@ if st.session_state.logado:
                 else:
                     df_h = pd.read_sql(text(f"SELECT * FROM pedidos WHERE loja = '{nome_loja}' ORDER BY id DESC"), engine)
                     for _, row in df_h.iterrows():
-                        with st.expander(f"Pedido #{row['id']} - {row['fornecedor']} ({row['data']}) - Status: {row['status']}"):
+                        with st.expander(f"Pedido #{row['id']} - {row['fornecedor']} ({row['data']})"):
                             st.write(row['itens'])
+                            if st.button(f"✏️ Editar #{row['id']}", key=f"re_{row['id']}"):
+                                k_re = f"car_{nome_loja}_{row['fornecedor']}"
+                                if k_re not in st.session_state: st.session_state[k_re] = []
+                                for i_s in row['itens'].split(", "):
+                                    try: qv, nv = i_s.split("x ", 1); st.session_state[k_re].append({"Item": nv, "Qtd": int(qv)})
+                                    except: pass
+                                with engine.connect() as conn:
+                                    conn.execute(text("DELETE FROM pedidos WHERE id=:id"), {"id": row['id']}); conn.commit()
+                                st.rerun()
 
-    # --- 6. TELA: ADM ---
-    elif st.session_state.menu_selecionado == "Gerenciamento":
+    # --- 6. TELA: ADM (AJUSTADA PARA PENDENTE/ATENDIDO) ---
+    elif st.session_state.menu_selecionado == "ADM":
         st.header("⚙️ GERENCIAMENTO DE PEDIDOS (ADM)")
-        aba_pendente, aba_atendido = st.tabs(["⏳ PENDENTES", "✅ ATENDIDOS"])
         
-        with aba_pendente:
+        tab_pendentes, tab_atendidos = st.tabs(["⏳ Pendentes", "✅ Atendidos"])
+        
+        with tab_pendentes:
             df_adm = pd.read_sql(text("SELECT * FROM pedidos WHERE status != 'Atendido' OR status IS NULL ORDER BY id DESC"), engine)
             if not df_adm.empty:
                 if 'ids_sel' not in st.session_state: st.session_state.ids_sel = []
+                
                 c1, c2, c3 = st.columns(3)
                 if st.session_state.ids_sel:
                     df_sel = df_adm[df_adm['id'].isin(st.session_state.ids_sel)]
                     c1.download_button("📄 PDF", data=gerar_pdf_niyati(df_sel), file_name="pedidos.pdf", use_container_width=True)
+                    
+                    # BOTÃO ATENDER
                     if c2.button("✔️ MARCAR COMO ATENDIDO", type="primary", use_container_width=True):
                         with engine.connect() as conn:
                             conn.execute(text("UPDATE pedidos SET status = 'Atendido' WHERE id IN :ids"), {"ids": tuple(st.session_state.ids_sel)})
                             conn.commit()
-                        st.session_state.ids_sel = []; st.rerun()
+                        st.session_state.ids_sel = []
+                        st.rerun()
+                    
                     if c3.button("Limpar Seleção", use_container_width=True): st.session_state.ids_sel = []; st.rerun()
-                
+
                 with engine.connect() as conn:
                     lojas_adm = [r[0] for r in conn.execute(text('SELECT nome FROM lojas')).fetchall()]
                 tabs_adm = st.tabs(lojas_adm)
@@ -186,15 +219,15 @@ if st.session_state.logado:
                             elif not chk and r_adm['id'] in st.session_state.ids_sel: st.session_state.ids_sel.remove(r_adm['id']); st.rerun()
                             with c_ex.expander(f"📦 Pedido #{r_adm['id']} | {r_adm['fornecedor']} | {r_adm['data']}"):
                                 st.write(r_adm['itens'])
+                                if st.button("Excluir", key=f"del_{r_adm['id']}"):
+                                    with engine.connect() as conn: conn.execute(text("DELETE FROM pedidos WHERE id=:id"), {"id": r_adm['id']}); conn.commit(); st.rerun()
             else: st.info("Não há pedidos pendentes.")
 
-        with aba_atendido:
+        with tab_atendidos:
             df_atendido = pd.read_sql(text("SELECT * FROM pedidos WHERE status = 'Atendido' ORDER BY id DESC"), engine)
-            if not df_atendido.empty:
-                st.dataframe(df_atendido[["id", "data", "loja", "fornecedor", "itens"]], use_container_width=True)
-            else: st.info("Nenhum pedido atendido ainda.")
+            st.dataframe(df_atendido, use_container_width=True)
 
-    elif st.session_state.menu_selecionado == "Gerar Pedidos":
+    elif st.session_state.menu_selecionado == "Gerar":
         st.header("📝 GERAR PEDIDOS AVULSOS")
         if 'car_av' not in st.session_state: st.session_state.car_av = []
         with engine.connect() as conn:
@@ -221,7 +254,7 @@ if st.session_state.logado:
                 conn.execute(text("INSERT INTO produtos (nome) VALUES (:n)"), {"n": np}); conn.commit(); st.rerun()
         st.dataframe(pd.read_sql(text("SELECT * FROM produtos ORDER BY nome"), engine), use_container_width=True)
 
-    elif st.session_state.menu_selecionado == "Configurações":
+    elif st.session_state.menu_selecionado == "Config":
         st.header("🛠️ CONFIGURAÇÕES")
         c1, c2 = st.columns(2)
         with c1:
