@@ -51,20 +51,21 @@ def verificar_alertas():
 # --- 4. NAVEGAÇÃO ---
 def navegar(d): st.session_state.menu = d
 
-# --- ADICIONE A LOGO AQUI (LOGO ABAIXO DO NAVEGAR) ---
+# Tenta carregar a logo. Se não conseguir, usa o texto NIYATI
 try:
-    # Se o arquivo estiver na mesma pasta, use "logo.png"
-    # Se quiser testar agora, pode usar este link de exemplo:
-    st.sidebar.image("logo.png", use_container_width=True) 
+    # use_container_width=True faz com que ela se ajuste sozinha à largura da barra lateral
+    st.sidebar.image("niyati.jpg", use_container_width=True)
 except:
-    # Caso a imagem não seja encontrada, ele mostra o nome em texto para não travar
     st.sidebar.markdown("<h2 style='text-align: center; color: #007bff;'>NIYATI</h2>", unsafe_allow_html=True)
 
 st.sidebar.info(f"Loja: {st.session_state.loja_atual}")
 
-# O sistema de alerta deve vir logo abaixo da logo
+# Alerta de pedidos pendentes (logo abaixo da logo/info da loja)
 verificar_alertas()
 
+st.sidebar.divider() # Uma linha fina para separar a logo dos botões
+
+# Botões de Navegação
 st.sidebar.button("🛒 PEDIDOS", on_click=navegar, args=("Pedidos",), use_container_width=True)
 # ... restante dos botões
 if st.session_state.nivel == 'admin':
@@ -298,4 +299,5 @@ elif st.session_state.menu == "Config":
                 if c2.button("Excluir Login", key=f"be_{r['id']}"):
                     with engine.begin() as conn: conn.execute(text("DELETE FROM usuarios WHERE id=:id"), {"id": r['id']})
                     st.rerun()
+
 
