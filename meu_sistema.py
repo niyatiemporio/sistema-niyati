@@ -54,7 +54,7 @@ def navegar(d): st.session_state.menu = d
 # Tenta carregar a logo. Se não conseguir, usa o texto NIYATI
 try:
     # use_container_width=True faz com que ela se ajuste sozinha à largura da barra lateral
-    st.sidebar.image("niyati.jpg", use_container_width=True)
+    st.sidebar.image("LOGO EM ALTA QUALIDADE niyati.jpg", use_container_width=True)
 except:
     st.sidebar.markdown("<h2 style='text-align: center; color: #007bff;'>NIYATI</h2>", unsafe_allow_html=True)
 
@@ -299,5 +299,6 @@ elif st.session_state.menu == "Config":
                 if c2.button("Excluir Login", key=f"be_{r['id']}"):
                     with engine.begin() as conn: conn.execute(text("DELETE FROM usuarios WHERE id=:id"), {"id": r['id']})
                     st.rerun()
+
 
 
