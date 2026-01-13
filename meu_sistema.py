@@ -15,7 +15,7 @@ def get_engine():
     elif "database" in st.secrets:
         url = st.secrets["database"]["url"]
     else:
-        st.error("Configure os Secrets!")
+        st.error("Configura os Secrets no Streamlit!")
         st.stop()
     url = url.strip().split("?")[0]
     if url.startswith("postgres://"): url = url.replace("postgres://", "postgresql://", 1)
@@ -73,14 +73,10 @@ def gerar_pdf_bonito(df, titulo="ORDEM DE PEDIDO"):
         pdf.cell(30, 10, "QTD", border=1, align='C', fill=True)
         pdf.cell(160, 10, "DESCRIÇÃO DO PRODUTO", border=1, align='C', fill=True); pdf.ln()
         pdf.set_font("Arial", '', 10)
-        for it in r['itens'].split(", "):
-            if "x " in it:
-                q, n = it.split("x ", 1)
-                pdf.cell(30, 8, q, border=1, align='C')
-                pdf.cell(160, 8, f" {n}", border=1); pdf.ln()
-            else:
-                pdf.cell(30, 8, "1", border=1, align='C')
-                pdf.cell(160, 8, f" {it}", border=1); pdf.ln()
+        for it in str(r['itens']).split(", "):
+            q, n = it.split("x ", 1) if "x " in it else ("1", it)
+            pdf.cell(30, 8, q, border=1, align='C')
+            pdf.cell(160, 8, f" {n}", border=1); pdf.ln()
     return pdf.output(dest='S').encode('latin-1')
 
 # --- 5. TELAS ---
@@ -95,29 +91,30 @@ if st.session_state.menu == "Pedidos":
         c1, c2 = st.columns([3, 1])
         f_sel = c1.selectbox("Fornecedor", forns)
         if c2.button("➕/➖ Fornecedor"): st.session_state.show_f = not st.session_state.get('show_f', False)
+        
         if st.session_state.get('show_f'):
             with st.expander("Gerenciar Fornecedores", expanded=True):
                 nf = st.text_input("Novo Fornecedor")
-                if st.button("Gravar Forn"):
+                if st.button("Gravar"):
                     with engine.begin() as conn: conn.execute(text("INSERT INTO fornecedores (nome) VALUES (:n)"), {"n": nf.upper()}); st.rerun()
                 for f in forns:
                     cc1, cc2 = st.columns([4, 1]); cc1.write(f)
-                    if cc2.button("X", key=f"df_{f}"):
+                    if cc2.button("X", key=f"df_l_{f}"):
                         with engine.begin() as conn: conn.execute(text("DELETE FROM fornecedores WHERE nome=:n"), {"n": f}); st.rerun()
         
         key_c = f"cart_{st.session_state.loja_atual}_{f_sel}"
         if key_c not in st.session_state: st.session_state[key_c] = []
         with st.container(border=True):
             ci, cq = st.columns([3, 1])
-            it_n = ci.text_input("Produto", key="it_n")
-            it_q = cq.text_input("Qtd", key="qt_n")
+            it_n, it_q = ci.text_input("Produto", key="it_n"), cq.text_input("Qtd", key="qt_n")
             if st.button("➕ Adicionar Linha"):
                 if it_n: st.session_state[key_c].append({"item": it_n, "qtd": it_q}); st.rerun()
+
         for i, v in enumerate(st.session_state[key_c]):
             c1, c2, c3 = st.columns([3, 1, 0.5])
-            v['item'] = c1.text_input(f"It_{i}", v['item'], key=f"ei_{i}")
-            v['qtd'] = c2.text_input(f"Qt_{i}", v['qtd'], key=f"eq_{i}")
+            v['item'], v['qtd'] = c1.text_input(f"It_{i}", v['item']), c2.text_input(f"Qt_{i}", v['qtd'])
             if c3.button("❌", key=f"di_{i}"): st.session_state[key_c].pop(i); st.rerun()
+        
         if st.session_state[key_c] and st.button("🚀 ENVIAR PEDIDO", type="primary"):
             txt = ", ".join([f"{x['qtd']}x {x['item']}" for x in st.session_state[key_c]])
             with engine.begin() as conn:
@@ -130,14 +127,12 @@ if st.session_state.menu == "Pedidos":
         if 'g_cart' not in st.session_state: st.session_state.g_cart = []
         with st.container(border=True):
             cg1, cg2 = st.columns([3, 1])
-            git = cg1.text_input("Produto Granel")
-            gqt = cg2.text_input("Qtd")
+            git, gqt = cg1.text_input("Produto Granel", key="git"), cg2.text_input("Qtd", key="gqt")
             if st.button("➕ Adicionar Item Granel"):
                 if git: st.session_state.g_cart.append({"item": git, "qtd": gqt}); st.rerun()
         for i, g in enumerate(st.session_state.g_cart):
             col1, col2, col3 = st.columns([3,1,0.5])
-            g['item'] = col1.text_input(f"G_it_{i}", g['item'])
-            g['qtd'] = col2.text_input(f"G_qt_{i}", g['qtd'])
+            g['item'], g['qtd'] = col1.text_input(f"G_it_{i}", g['item']), col2.text_input(f"G_qt_{i}", g['qtd'])
             if col3.button("❌", key=f"dg_{i}"): st.session_state.g_cart.pop(i); st.rerun()
         if st.session_state.g_cart and st.button("Enviar Granel", type="primary"):
             txt_g = ", ".join([f"{x['qtd']}x {x['item']}" for x in st.session_state.g_cart])
@@ -167,7 +162,7 @@ elif st.session_state.menu == "ADM":
             if c_sel.checkbox("", key=f"sel_{r['id']}"): sel_ids.append(r['id'])
             with c_exp.expander(f"LOJA: {r['loja']} | Nº: {r['id']} | DATA: {r['data']}"):
                 for it in r['itens'].split(", "):
-                    q, n = it.split("x ", 1) if "x " in it else ("?", it)
+                    q, n = it.split("x ", 1) if "x " in it else ("1", it)
                     st.markdown(f"**<span style='color:red'>{q}</span>** - {n}", unsafe_allow_html=True)
                 edit_adm = st.text_area("Editar Texto", r['itens'], key=f"adm_ed_{r['id']}")
                 c1, c2 = st.columns(2)
@@ -192,7 +187,7 @@ elif st.session_state.menu == "ADM":
             if c_s.checkbox("", key=f"sg_{r['id']}"): sel_g.append(r['id'])
             with c_e.expander(f"GRANEL: {r['loja']} - {r['data']}"):
                 for it in r['itens'].split(", "):
-                    q, n = it.split("x ", 1) if "x " in it else ("?", it)
+                    q, n = it.split("x ", 1) if "x " in it else ("1", it)
                     st.markdown(f"**<span style='color:red'>{q}</span>** - {n}", unsafe_allow_html=True)
         if sel_g:
             c1, c2 = st.columns(2)
@@ -213,21 +208,24 @@ elif st.session_state.menu == "ADM":
                     with engine.begin() as conn: conn.execute(text("DELETE FROM pedidos WHERE id=:id"), {"id": r['id']})
                     st.rerun()
         if sel_at:
-            st.download_button("📄 GERAR PDF ATENDIDOS", data=gerar_pdf_bonito(df_at[df_at['id'].isin(sel_at)]), file_name="atendidos.pdf")
+            c1, c2 = st.columns(2)
+            c1.download_button("📄 GERAR PDF ATENDIDOS", data=gerar_pdf_bonito(df_at[df_at['id'].isin(sel_at)]), file_name="atendidos.pdf")
+            if c2.button("🗑️ EXCLUIR SELECIONADOS"):
+                with engine.begin() as conn: conn.execute(text("DELETE FROM pedidos WHERE id IN :ids"), {"ids": tuple(sel_at)})
+                st.rerun()
 
 elif st.session_state.menu == "Avulsos":
     st.header("📝 Pedidos Avulsos")
     if 'av_cart' not in st.session_state: st.session_state.av_cart = []
-    f_av = st.text_input("Fornecedor", key="f_av")
+    f_av = st.text_input("Fornecedor", key="f_av_man")
     with st.container(border=True):
         c1, c2 = st.columns([3, 1])
         it, qt = c1.text_input("Produto"), c2.text_input("Qtd")
-        if st.button("➕ Adicionar"):
+        if st.button("➕ Adicionar Linha"):
             if it: st.session_state.av_cart.append({"item": it, "qtd": qt}); st.rerun()
     for i, v in enumerate(st.session_state.av_cart):
         c1, c2, c3 = st.columns([3, 1, 0.5])
-        v['item'] = c1.text_input(f"Ai_{i}", v['item'])
-        v['qtd'] = c2.text_input(f"Aq_{i}", v['qtd'])
+        v['item'], v['qtd'] = c1.text_input(f"Ai_{i}", v['item']), c2.text_input(f"Aq_{i}", v['qtd'])
         if c3.button("❌", key=f"dav_{i}"): st.session_state.av_cart.pop(i); st.rerun()
     if st.session_state.av_cart:
         txt_av = ", ".join([f"{x['qtd']}x {x['item']}" for x in st.session_state.av_cart])
@@ -241,7 +239,9 @@ elif st.session_state.menu == "Prods":
         with engine.begin() as conn: conn.execute(text("INSERT INTO produtos (nome) VALUES (:n)"), {"n": np.upper()}); st.rerun()
     df_p = pd.read_sql(text("SELECT * FROM produtos ORDER BY nome"), engine)
     if not df_p.empty:
-        st.download_button("📄 EXPORTAR LISTA PDF", data=gerar_pdf_bonito(pd.DataFrame([{"id":"0","loja":"PRODUTOS","fornecedor":"GERAL","data":"","itens":", ".join(df_p['nome'].tolist())}])), file_name="produtos.pdf")
+        txt_p = ", ".join(df_p['nome'].tolist())
+        df_exp = pd.DataFrame([{"id":"-","loja":"LISTA GERAL","fornecedor":"NIYATI","data":"","itens":txt_p}])
+        st.download_button("📄 EXPORTAR PDF", data=gerar_pdf_bonito(df_exp), file_name="produtos.pdf")
         for _, r in df_p.iterrows():
             c1, c2 = st.columns([4, 1]); c1.write(r['nome'])
             if c2.button("X", key=f"dp_{r['id']}"):
