@@ -233,19 +233,44 @@ elif st.session_state.menu == "Avulsos":
         st.download_button("📄 GERAR PDF AVULSO", data=gerar_pdf_bonito(df_v), file_name="avulso.pdf")
 
 elif st.session_state.menu == "Prods":
-    st.header("🍎 Lista de Produtos")
-    np = st.text_input("Novo Produto")
-    if st.button("Salvar Produto"):
-        with engine.begin() as conn: conn.execute(text("INSERT INTO produtos (nome) VALUES (:n)"), {"n": np.upper()}); st.rerun()
+    st.header("🍎 Lista Geral de Produtos")
+    
+    # 1. Cadastro de Novo Produto
+    with st.container(border=True):
+        np = st.text_input("Nome do Novo Produto")
+        if st.button("Gravar Produto", type="primary"):
+            if np:
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(text("INSERT INTO produtos (nome) VALUES (:n)"), {"n": np.upper()})
+                    st.success(f"Produto '{np}' salvo!")
+                    st.rerun()
+                except:
+                    st.error("Erro ao salvar. Verifique se o produto já existe.")
+
+    st.divider()
+
+    # 2. Visualização e Gestão da Lista
     df_p = pd.read_sql(text("SELECT * FROM produtos ORDER BY nome"), engine)
+    
     if not df_p.empty:
-        txt_p = ", ".join(df_p['nome'].tolist())
-        df_exp = pd.DataFrame([{"id":"-","loja":"LISTA GERAL","fornecedor":"NIYATI","data":"","itens":txt_p}])
-        st.download_button("📄 EXPORTAR PDF", data=gerar_pdf_bonito(df_exp), file_name="produtos.pdf")
+        c1, c2 = st.columns([2, 1])
+        c1.subheader(f"Produtos Cadastrados ({len(df_p)})")
+        
+        # Botão de Gerar PDF da Lista
+        pdf_data = gerar_pdf_bonito(pd.DataFrame([{"id": "-", "loja": "LISTA GERAL", "fornecedor": "NIYATI", "data": datetime.now().strftime("%d/%m/%Y"), "itens": ", ".join(df_p['nome'].tolist())}]), titulo="LISTA DE PRODUTOS")
+        c2.download_button("📄 Gerar PDF da Lista", data=pdf_data, file_name="lista_produtos.pdf", use_container_width=True)
+
+        # Tabela com opção de excluir
         for _, r in df_p.iterrows():
-            c1, c2 = st.columns([4, 1]); c1.write(r['nome'])
-            if c2.button("X", key=f"dp_{r['id']}"):
-                with engine.begin() as conn: conn.execute(text("DELETE FROM produtos WHERE id=:id"), {"id": r['id']}); st.rerun()
+            col_nome, col_del = st.columns([4, 1])
+            col_nome.write(f"🔹 {r['nome']}")
+            if col_del.button("Excluir", key=f"del_prod_{r['id']}"):
+                with engine.begin() as conn:
+                    conn.execute(text("DELETE FROM produtos WHERE id=:id"), {"id": r['id']})
+                st.rerun()
+    else:
+        st.info("Nenhum produto cadastrado ainda.")
 
 elif st.session_state.menu == "Config":
     st.header("🛠️ Configurações")
@@ -270,3 +295,4 @@ elif st.session_state.menu == "Config":
                 if c2.button("Excluir Login", key=f"be_{r['id']}"):
                     with engine.begin() as conn: conn.execute(text("DELETE FROM usuarios WHERE id=:id"), {"id": r['id']})
                     st.rerun()
+
