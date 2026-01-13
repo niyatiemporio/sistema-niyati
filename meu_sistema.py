@@ -126,9 +126,10 @@ if st.session_state.menu == "Pedidos":
         key_c = f"cart_{st.session_state.loja_atual}_{f_sel}"
         if key_c not in st.session_state: st.session_state[key_c] = []
         
-        # --- BLOCO 1: NOVO PEDIDO UNIFICADO ---
+        # --- CAMPO ÚNICO INTELIGENTE ---
         with st.container(border=True):
             ci, cq = st.columns([3, 1])
+            # Multiselect limitado a 1 permite digitar itens novos e apertar Enter
             p_sel = ci.multiselect("Produto (Busca ou Digita novo + Enter)", options=prods_lista, max_selections=1, key=f"search_{f_sel}")
             produto_final = p_sel[0] if p_sel else ""
             it_q = cq.text_input("Qtd", key=f"qt_n_{f_sel}")
@@ -144,7 +145,7 @@ if st.session_state.menu == "Pedidos":
             v['qtd'] = c2.text_input(f"Qt_{i}", v['qtd'], key=f"eq_{f_sel}_{i}")
             if c3.button("❌", key=f"di_{f_sel}_{i}"): st.session_state[key_c].pop(i); st.rerun()
         
-        if st.session_state[key_c] and st.button("🚀 ENVIAR PEDIDO", type="primary"):
+        if st.session_state[key_c] and st.button("🚀 ENVIAR PEDIDO", type="primary", key=f"env_{f_sel}"):
             txt = ", ".join([f"{x['qtd']}x {x['item']}" for x in st.session_state[key_c]])
             with engine.begin() as conn:
                 conn.execute(text("INSERT INTO pedidos (data, loja, fornecedor, itens, tipo) VALUES (:d,:l,:f,:i,'Normal')"),
@@ -155,7 +156,6 @@ if st.session_state.menu == "Pedidos":
         st.subheader("🌾 Pedidos Granel")
         if 'g_cart' not in st.session_state: st.session_state.g_cart = []
         
-        # --- BLOCO 2: GRANEL UNIFICADO ---
         with st.container(border=True):
             cg1, cg2 = st.columns([3, 1])
             g_sel = cg1.multiselect("Produto Granel (Busca ou Digita)", options=prods_lista, max_selections=1, key="git_search")
@@ -257,14 +257,13 @@ elif st.session_state.menu == "Avulsos":
         
     f_av = st.text_input("Fornecedor", key="f_av_man")
     
-    # --- BLOCO 3: AVULSO UNIFICADO ---
     with st.container(border=True):
         ci, cq = st.columns([3, 1])
         av_sel = ci.multiselect("Produto", options=prods_av, max_selections=1, key="av_search")
         produto_av = av_sel[0] if av_sel else ""
         it_q_av = cq.text_input("Qtd", key="av_q")
         
-        if st.button("➕ Adicionar Linha"):
+        if st.button("➕ Adicionar Linha", key="btn_av_add"):
             if produto_av: st.session_state.av_cart.append({"item": produto_av, "qtd": it_q_av}); st.rerun()
             
     for i, v in enumerate(st.session_state.av_cart):
