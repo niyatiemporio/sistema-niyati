@@ -99,10 +99,13 @@ if st.session_state.menu == "Pedidos":
     st.header(f"🛒 Área de Pedidos")
     t1, t2, t3 = st.tabs(["🛒 Novo Pedido", "📦 Pedidos Granel", "⏳ Histórico"])
 
+    # BUSCA PRODUTOS PARA O AUTOCOMPLETE (USADO EM T1 E T2)
+    with engine.connect() as conn:
+        prods_lista = [r[0] for r in conn.execute(text('SELECT nome FROM produtos ORDER BY nome')).fetchall()]
+
     with t1:
         with engine.connect() as conn:
             forns = [r[0] for r in conn.execute(text('SELECT nome FROM fornecedores ORDER BY nome')).fetchall()]
-            prods = [r[0] for r in conn.execute(text('SELECT nome FROM produtos ORDER BY nome')).fetchall()]
         
         with st.expander("➕/➖ Adicionar ou Excluir Fornecedores", expanded=False):
             nf = st.text_input("Nome do Novo Fornecedor")
@@ -123,12 +126,11 @@ if st.session_state.menu == "Pedidos":
         key_c = f"cart_{st.session_state.loja_atual}_{f_sel}"
         if key_c not in st.session_state: st.session_state[key_c] = []
         
+        # --- BLOCO 1: NOVO PEDIDO UNIFICADO ---
         with st.container(border=True):
             ci, cq = st.columns([3, 1])
-            p_input = ci.multiselect("Produto (Busca ou Digita novo + Enter)", options=prods, max_selections=1, key=f"search_{f_sel}")
-            produto_final = p_input[0] if p_input else ""
-            if not produto_final:
-                produto_final = ci.text_input("Ou digite o novo item aqui:", key=f"manual_{f_sel}")
+            p_sel = ci.multiselect("Produto (Busca ou Digita novo + Enter)", options=prods_lista, max_selections=1, key=f"search_{f_sel}")
+            produto_final = p_sel[0] if p_sel else ""
             it_q = cq.text_input("Qtd", key=f"qt_n_{f_sel}")
             
             if st.button("➕ Adicionar Linha", key=f"btn_add_{f_sel}"):
@@ -152,23 +154,28 @@ if st.session_state.menu == "Pedidos":
     with t2:
         st.subheader("🌾 Pedidos Granel")
         if 'g_cart' not in st.session_state: st.session_state.g_cart = []
+        
+        # --- BLOCO 2: GRANEL UNIFICADO ---
         with st.container(border=True):
             cg1, cg2 = st.columns([3, 1])
-            git = cg1.text_input("Produto Granel", key="git")
+            g_sel = cg1.multiselect("Produto Granel (Busca ou Digita)", options=prods_lista, max_selections=1, key="git_search")
+            produto_g = g_sel[0] if g_sel else ""
             gqt = cg2.text_input("Qtd", key="gqt")
             if st.button("➕ Adicionar Item Granel"):
-                if git: st.session_state.g_cart.append({"item": git, "qtd": gqt}); st.rerun()
+                if produto_g: st.session_state.g_cart.append({"item": produto_g, "qtd": gqt}); st.rerun()
+        
         for i, g in enumerate(st.session_state.g_cart):
             col1, col2, col3 = st.columns([3,1,0.5])
             g['item'] = col1.text_input(f"G_it_{i}", g['item'])
             g['qtd'] = col2.text_input(f"G_qt_{i}", g['qtd'])
             if col3.button("❌", key=f"dg_{i}"): st.session_state.g_cart.pop(i); st.rerun()
+        
         if st.session_state.g_cart and st.button("Enviar Granel", type="primary"):
             txt_g = ", ".join([f"{x['qtd']}x {x['item']}" for x in st.session_state.g_cart])
             with engine.begin() as conn:
                 conn.execute(text("INSERT INTO pedidos (data, loja, fornecedor, itens, tipo) VALUES (:d,:l,'GRANEL',:i,'Granel')"),
                              {"d": datetime.now().strftime("%d/%m/%Y"), "l": st.session_state.loja_atual, "i": txt_g})
-            st.session_state.g_cart = []; st.success("Granel Enviado!"); st.rerun()
+            st.session_state.g_cart = []; st.success("Enviado!"); st.rerun()
 
     with t3:
         df_h = pd.read_sql(text(f"SELECT * FROM pedidos WHERE loja = '{st.session_state.loja_atual}' ORDER BY id DESC"), engine)
@@ -235,9 +242,9 @@ elif st.session_state.menu == "ADM":
                     with engine.begin() as conn: conn.execute(text("DELETE FROM pedidos WHERE id=:id"), {"id": r['id']})
                     st.rerun()
         if sel_at:
-            c1, col_ex = st.columns(2)
+            c1, c2 = st.columns(2)
             c1.download_button("📄 GERAR PDF ATENDIDOS", data=gerar_pdf_bonito(df_at[df_at['id'].isin(sel_at)]), file_name="atendidos.pdf")
-            if col_ex.button("🗑️ EXCLUIR SELECIONADOS"):
+            if c2.button("🗑️ EXCLUIR SELECIONADOS"):
                 with engine.begin() as conn: conn.execute(text("DELETE FROM pedidos WHERE id IN :ids"), {"ids": tuple(sel_at)})
                 st.rerun()
 
@@ -249,16 +256,16 @@ elif st.session_state.menu == "Avulsos":
         prods_av = [r[0] for r in conn.execute(text('SELECT nome FROM produtos ORDER BY nome')).fetchall()]
         
     f_av = st.text_input("Fornecedor", key="f_av_man")
+    
+    # --- BLOCO 3: AVULSO UNIFICADO ---
     with st.container(border=True):
         ci, cq = st.columns([3, 1])
-        p_av_in = ci.multiselect("Produto", options=prods_av, max_selections=1, key="av_search")
-        p_av_final = p_av_in[0] if p_av_in else ""
-        if not p_av_final:
-            p_av_final = ci.text_input("Ou digite o item aqui:", key="av_man")
+        av_sel = ci.multiselect("Produto", options=prods_av, max_selections=1, key="av_search")
+        produto_av = av_sel[0] if av_sel else ""
         it_q_av = cq.text_input("Qtd", key="av_q")
         
         if st.button("➕ Adicionar Linha"):
-            if p_av_final: st.session_state.av_cart.append({"item": p_av_final, "qtd": it_q_av}); st.rerun()
+            if produto_av: st.session_state.av_cart.append({"item": produto_av, "qtd": it_q_av}); st.rerun()
             
     for i, v in enumerate(st.session_state.av_cart):
         c1, c2, c3 = st.columns([3, 1, 0.5])
