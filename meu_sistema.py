@@ -51,13 +51,22 @@ def verificar_alertas():
 # --- 4. NAVEGAÇÃO ---
 def navegar(d): st.session_state.menu = d
 
-st.sidebar.markdown("<h2 style='text-align: center; color: #007bff;'>NIYATI</h2>", unsafe_allow_html=True)
+# --- ADICIONE A LOGO AQUI (LOGO ABAIXO DO NAVEGAR) ---
+try:
+    # Se o arquivo estiver na mesma pasta, use "logo.png"
+    # Se quiser testar agora, pode usar este link de exemplo:
+    st.sidebar.image("logo.png", use_container_width=True) 
+except:
+    # Caso a imagem não seja encontrada, ele mostra o nome em texto para não travar
+    st.sidebar.markdown("<h2 style='text-align: center; color: #007bff;'>NIYATI</h2>", unsafe_allow_html=True)
+
 st.sidebar.info(f"Loja: {st.session_state.loja_atual}")
 
-# Chama o alerta aqui para aparecer na sidebar
+# O sistema de alerta deve vir logo abaixo da logo
 verificar_alertas()
 
 st.sidebar.button("🛒 PEDIDOS", on_click=navegar, args=("Pedidos",), use_container_width=True)
+# ... restante dos botões
 if st.session_state.nivel == 'admin':
     st.sidebar.button("⚙️ GERENCIAMENTO (ADM)", on_click=navegar, args=("ADM",), use_container_width=True)
     st.sidebar.button("📝 PEDIDOS AVULSOS", on_click=navegar, args=("Avulsos",), use_container_width=True)
@@ -289,3 +298,4 @@ elif st.session_state.menu == "Config":
                 if c2.button("Excluir Login", key=f"be_{r['id']}"):
                     with engine.begin() as conn: conn.execute(text("DELETE FROM usuarios WHERE id=:id"), {"id": r['id']})
                     st.rerun()
+
