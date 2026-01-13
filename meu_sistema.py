@@ -40,281 +40,131 @@ if not st.session_state.logado:
             else: st.error("Login ou Senha incorretos")
     st.stop()
 
-# --- 3. SISTEMA DE ALERTA ---
-def verificar_alertas():
-    if st.session_state.nivel == 'admin':
-        with engine.connect() as conn:
-            qtd = conn.execute(text("SELECT COUNT(*) FROM pedidos WHERE status = 'Pendente'")).scalar()
-            if qtd > 0:
-                st.sidebar.error(f"⚠️ {qtd} PEDIDOS PENDENTES!")
-
-# --- 4. NAVEGAÇÃO ---
+# --- 3. NAVEGAÇÃO ---
 def navegar(d): st.session_state.menu = d
 
-try:
-    st.sidebar.image("LOGO EM ALTA QUALIDADE niyati.jpg", use_container_width=True)
-except:
-    st.sidebar.markdown("<h2 style='text-align: center; color: #007bff;'>NIYATI</h2>", unsafe_allow_html=True)
-
-st.sidebar.info(f"Loja: {st.session_state.loja_atual}")
-verificar_alertas()
-st.sidebar.divider()
+st.sidebar.markdown("<h2 style='text-align: center;'>NIYATI</h2>", unsafe_allow_html=True)
+st.sidebar.info(f"Conectado: {st.session_state.loja_atual}")
 
 st.sidebar.button("🛒 PEDIDOS", on_click=navegar, args=("Pedidos",), use_container_width=True)
 if st.session_state.nivel == 'admin':
-    st.sidebar.button("⚙️ GERENCIAMENTO (ADM)", on_click=navegar, args=("ADM",), use_container_width=True)
+    st.sidebar.button("⚙️ ADM (GERENCIAMENTO)", on_click=navegar, args=("ADM",), use_container_width=True)
     st.sidebar.button("📝 PEDIDOS AVULSOS", on_click=navegar, args=("Avulsos",), use_container_width=True)
-    st.sidebar.button("🍎 LISTA DE PRODUTOS", on_click=navegar, args=("Prods",), use_container_width=True)
     st.sidebar.button("🛠️ CONFIGURAÇÕES", on_click=navegar, args=("Config",), use_container_width=True)
 
 if st.sidebar.button("🚪 SAIR", use_container_width=True):
     st.session_state.logado = False
     st.rerun()
 
-# --- 5. FUNÇÃO PDF ---
-def gerar_pdf_bonito(df, titulo="ORDEM DE PEDIDO"):
+# --- 4. FUNÇÃO PDF ---
+def gerar_pdf(df):
     pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=15)
     for _, r in df.iterrows():
         pdf.add_page()
-        pdf.set_fill_color(0, 51, 102); pdf.set_text_color(255, 255, 255)
-        pdf.set_font("Arial", 'B', 16)
-        pdf.cell(0, 15, f"LOJA: {str(r['loja']).upper()}", ln=True, align='C', fill=True)
-        pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", 'B', 10); pdf.ln(5)
-        pdf.cell(95, 8, f"FORNECEDOR: {r['fornecedor']}", border='B')
-        pdf.cell(95, 8, f"DATA: {r['data']} | N: {r['id']}", border='B', ln=True, align='R')
-        pdf.ln(5); pdf.set_fill_color(230, 230, 230); pdf.set_font("Arial", 'B', 10)
-        pdf.cell(30, 10, "QTD", border=1, align='C', fill=True)
-        pdf.cell(160, 10, "DESCRIÇÃO DO PRODUTO", border=1, align='C', fill=True); pdf.ln()
-        pdf.set_font("Arial", '', 10)
-        for it in str(r['itens']).split(", "):
-            q, n = it.split("x ", 1) if "x " in it else ("1", it)
-            pdf.cell(30, 8, q, border=1, align='C')
-            pdf.cell(160, 8, f" {n}", border=1); pdf.ln()
+        pdf.set_font("Arial", 'B', 16); pdf.cell(0, 10, f"LOJA: {r['loja']}", ln=True)
+        pdf.set_font("Arial", '', 12); pdf.cell(0, 10, f"Forn: {r['fornecedor']} | Data: {r['data']}", ln=True)
+        pdf.ln(5); pdf.multi_cell(0, 10, f"ITENS:\n{r['itens']}")
     return pdf.output(dest='S').encode('latin-1')
 
-# --- 6. TELAS ---
+# --- 5. TELAS ---
 
 if st.session_state.menu == "Pedidos":
     st.header(f"🛒 Área de Pedidos")
     t1, t2, t3 = st.tabs(["🛒 Novo Pedido", "📦 Pedidos Granel", "⏳ Histórico"])
 
-    # BUSCA PRODUTOS PARA O AUTOCOMPLETE (USADO EM T1 E T2)
-    with engine.connect() as conn:
-        prods_lista = [r[0] for r in conn.execute(text('SELECT nome FROM produtos ORDER BY nome')).fetchall()]
-
     with t1:
         with engine.connect() as conn:
             forns = [r[0] for r in conn.execute(text('SELECT nome FROM fornecedores ORDER BY nome')).fetchall()]
         
-        with st.expander("➕/➖ Adicionar ou Excluir Fornecedores", expanded=False):
-            nf = st.text_input("Nome do Novo Fornecedor")
-            if st.button("Gravar Fornecedor", type="primary"):
-                if nf:
-                    with engine.begin() as conn: conn.execute(text("INSERT INTO fornecedores (nome) VALUES (:n)"), {"n": nf.upper()})
-                    st.rerun()
-            for f in forns:
-                cc1, cc2 = st.columns([4, 1])
-                cc1.write(f)
-                if cc2.button("X", key=f"del_f_loja_{f}"):
-                    with engine.begin() as conn: conn.execute(text("DELETE FROM fornecedores WHERE nome=:n"), {"n": f})
-                    st.rerun()
-        
-        st.divider()
-        f_sel = st.selectbox("Selecione o Fornecedor para o Pedido", forns)
-        
+        f_sel = st.selectbox("Selecione o Fornecedor", forns)
         key_c = f"cart_{st.session_state.loja_atual}_{f_sel}"
         if key_c not in st.session_state: st.session_state[key_c] = []
-        
-        # --- CAMPO ÚNICO INTELIGENTE ---
+
         with st.container(border=True):
-            ci, cq = st.columns([3, 1])
-            # Multiselect limitado a 1 permite digitar itens novos e apertar Enter
-            p_sel = ci.multiselect("Produto (Busca ou Digita novo + Enter)", options=prods_lista, max_selections=1, key=f"search_{f_sel}")
-            produto_final = p_sel[0] if p_sel else ""
-            it_q = cq.text_input("Qtd", key=f"qt_n_{f_sel}")
-            
-            if st.button("➕ Adicionar Linha", key=f"btn_add_{f_sel}"):
-                if produto_final:
-                    st.session_state[key_c].append({"item": produto_final, "qtd": it_q})
+            c_it, c_qt = st.columns([3, 1])
+            # CAMPO DE DIGITAR NORMALMENTE
+            it_nome = c_it.text_input("Digite o Produto", key="input_it")
+            it_qtd = c_qt.text_input("Qtd", key="input_qt")
+            if st.button("➕ Adicionar na Lista"):
+                if it_nome:
+                    st.session_state[key_c].append({"item": it_nome, "qtd": it_qtd})
                     st.rerun()
 
         for i, v in enumerate(st.session_state[key_c]):
-            c1, c2, c3 = st.columns([3, 1, 0.5])
-            v['item'] = c1.text_input(f"It_{i}", v['item'], key=f"ei_{f_sel}_{i}")
-            v['qtd'] = c2.text_input(f"Qt_{i}", v['qtd'], key=f"eq_{f_sel}_{i}")
-            if c3.button("❌", key=f"di_{f_sel}_{i}"): st.session_state[key_c].pop(i); st.rerun()
-        
-        if st.session_state[key_c] and st.button("🚀 ENVIAR PEDIDO", type="primary", key=f"env_{f_sel}"):
+            col1, col2, col3 = st.columns([3, 1, 0.5])
+            v['item'] = col1.text_input(f"Item {i}", v['item'], key=f"e_it_{i}")
+            v['qtd'] = col2.text_input(f"Qtd {i}", v['qtd'], key=f"e_qt_{i}")
+            if col3.button("❌", key=f"d_{i}"): st.session_state[key_c].pop(i); st.rerun()
+
+        if st.session_state[key_c] and st.button("🚀 ENVIAR PEDIDO FINAL", type="primary"):
             txt = ", ".join([f"{x['qtd']}x {x['item']}" for x in st.session_state[key_c]])
             with engine.begin() as conn:
-                conn.execute(text("INSERT INTO pedidos (data, loja, fornecedor, itens, tipo) VALUES (:d,:l,:f,:i,'Normal')"),
+                conn.execute(text("INSERT INTO pedidos (data, loja, fornecedor, itens, status) VALUES (:d,:l,:f,:i,'Pendente')"),
                              {"d": datetime.now().strftime("%d/%m/%Y"), "l": st.session_state.loja_atual, "f": f_sel, "i": txt})
             st.session_state[key_c] = []; st.success("Pedido Enviado!"); st.rerun()
 
     with t2:
         st.subheader("🌾 Pedidos Granel")
-        if 'g_cart' not in st.session_state: st.session_state.g_cart = []
-        
-        with st.container(border=True):
-            cg1, cg2 = st.columns([3, 1])
-            g_sel = cg1.multiselect("Produto Granel (Busca ou Digita)", options=prods_lista, max_selections=1, key="git_search")
-            produto_g = g_sel[0] if g_sel else ""
-            gqt = cg2.text_input("Qtd", key="gqt")
-            if st.button("➕ Adicionar Item Granel"):
-                if produto_g: st.session_state.g_cart.append({"item": produto_g, "qtd": gqt}); st.rerun()
-        
-        for i, g in enumerate(st.session_state.g_cart):
-            col1, col2, col3 = st.columns([3,1,0.5])
-            g['item'] = col1.text_input(f"G_it_{i}", g['item'])
-            g['qtd'] = col2.text_input(f"G_qt_{i}", g['qtd'])
-            if col3.button("❌", key=f"dg_{i}"): st.session_state.g_cart.pop(i); st.rerun()
-        
-        if st.session_state.g_cart and st.button("Enviar Granel", type="primary"):
-            txt_g = ", ".join([f"{x['qtd']}x {x['item']}" for x in st.session_state.g_cart])
+        # Logica similar de digitar livremente
+        it_g = st.text_input("Produto Granel")
+        qt_g = st.text_input("Quantidade")
+        if st.button("Enviar Granel"):
             with engine.begin() as conn:
-                conn.execute(text("INSERT INTO pedidos (data, loja, fornecedor, itens, tipo) VALUES (:d,:l,'GRANEL',:i,'Granel')"),
-                             {"d": datetime.now().strftime("%d/%m/%Y"), "l": st.session_state.loja_atual, "i": txt_g})
-            st.session_state.g_cart = []; st.success("Enviado!"); st.rerun()
+                conn.execute(text("INSERT INTO pedidos (data, loja, fornecedor, itens, status) VALUES (:d,:l,'GRANEL',:i,'Pendente')"),
+                             {"d": datetime.now().strftime("%d/%m/%Y"), "l": st.session_state.loja_atual, "i": f"{qt_g}x {it_g}"})
+            st.success("Granel enviado!")
 
     with t3:
         df_h = pd.read_sql(text(f"SELECT * FROM pedidos WHERE loja = '{st.session_state.loja_atual}' ORDER BY id DESC"), engine)
-        for _, r in df_h.iterrows():
-            with st.expander(f"Pedido #{r['id']} - {r['data']} - {r['status']}"):
-                novo_t = st.text_area("Reeditar", r['itens'], key=f"hi_{r['id']}")
-                if st.button("Salvar Alteração", key=f"h_sv_{r['id']}"):
-                    with engine.begin() as conn: conn.execute(text("UPDATE pedidos SET itens=:i WHERE id=:id"), {"i": novo_t, "id": r['id']})
-                    st.rerun()
+        st.dataframe(df_h, use_container_width=True)
 
 elif st.session_state.menu == "ADM":
     st.header("⚙️ Gerenciamento ADM")
-    tp, tg, ta = st.tabs(["⏳ Pendentes", "🌾 Granel", "✅ Atendidos"])
-    
+    tp, ta = st.tabs(["⏳ Pendentes", "✅ Atendidos"])
     with tp:
-        df = pd.read_sql(text("SELECT * FROM pedidos WHERE status = 'Pendente' AND tipo = 'Normal' ORDER BY id DESC"), engine)
-        sel_ids = []
-        for _, r in df.iterrows():
-            c_sel, c_exp = st.columns([0.1, 0.9])
-            if c_sel.checkbox("", key=f"sel_{r['id']}"): sel_ids.append(r['id'])
-            with c_exp.expander(f"LOJA: {r['loja']} | Nº: {r['id']} | DATA: {r['data']}"):
-                for it in r['itens'].split(", "):
-                    q, n = it.split("x ", 1) if "x " in it else ("1", it)
-                    st.markdown(f"**<span style='color:red'>{q}</span>** - {n}", unsafe_allow_html=True)
-                edit_adm = st.text_area("Editar Texto", r['itens'], key=f"adm_ed_{r['id']}")
-                c1, c2 = st.columns(2)
-                if c1.button("Salvar", key=f"as_{r['id']}"):
-                    with engine.begin() as conn: conn.execute(text("UPDATE pedidos SET itens=:i WHERE id=:id"), {"i": edit_adm, "id": r['id']})
-                    st.rerun()
-                if c2.button("Excluir", key=f"ad_{r['id']}"):
-                    with engine.begin() as conn: conn.execute(text("DELETE FROM pedidos WHERE id=:id"), {"id": r['id']})
-                    st.rerun()
-        if sel_ids:
-            col1, col2 = st.columns(2)
-            if col1.button("✅ ATENDER SELECIONADOS", type="primary"):
-                with engine.begin() as conn: conn.execute(text("UPDATE pedidos SET status='Atendido' WHERE id IN :ids"), {"ids": tuple(sel_ids)})
-                st.rerun()
-            col2.download_button("📄 GERAR PDF", data=gerar_pdf_bonito(df[df['id'].isin(sel_ids)]), file_name="pedidos.pdf")
-
-    with tg:
-        df_g = pd.read_sql(text("SELECT * FROM pedidos WHERE status = 'Pendente' AND tipo = 'Granel' ORDER BY id DESC"), engine)
-        sel_g = []
-        for _, r in df_g.iterrows():
-            c_s, c_e = st.columns([0.1, 0.9])
-            if c_s.checkbox("", key=f"sg_{r['id']}"): sel_g.append(r['id'])
-            with c_e.expander(f"GRANEL: {r['loja']} - {r['data']}"):
+        df_p = pd.read_sql(text("SELECT * FROM pedidos WHERE status='Pendente'"), engine)
+        for _, r in df_p.iterrows():
+            with st.expander(f"Pedido #{r['id']} - {r['loja']}"):
                 st.write(r['itens'])
-        if sel_g:
-            c1, c2 = st.columns(2)
-            if c1.button("✅ ATENDER GRANEL", type="primary"):
-                with engine.begin() as conn: conn.execute(text("UPDATE pedidos SET status='Atendido' WHERE id IN :ids"), {"ids": tuple(sel_g)})
-                st.rerun()
-            c2.download_button("📄 PDF GRANEL", data=gerar_pdf_bonito(df_g[df_g['id'].isin(sel_g)]), file_name="granel.pdf")
-
+                if st.button("Marcar Atendido", key=f"at_{r['id']}"):
+                    with engine.begin() as conn: conn.execute(text("UPDATE pedidos SET status='Atendido' WHERE id=:id"), {"id": r['id']})
+                    st.rerun()
     with ta:
-        df_at = pd.read_sql(text("SELECT * FROM pedidos WHERE status = 'Atendido' ORDER BY id DESC"), engine)
-        sel_at = []
-        for _, r in df_at.iterrows():
-            c_s, c_e = st.columns([0.1, 0.9])
-            if c_s.checkbox("", key=f"sat_{r['id']}"): sel_at.append(r['id'])
-            with c_e.expander(f"LOJA: {r['loja']} | N: {r['id']} | DATA: {r['data']}"):
-                st.write(r['itens'])
-                if st.button("Excluir Histórico", key=f"dat_{r['id']}"):
-                    with engine.begin() as conn: conn.execute(text("DELETE FROM pedidos WHERE id=:id"), {"id": r['id']})
-                    st.rerun()
-        if sel_at:
-            c1, c2 = st.columns(2)
-            c1.download_button("📄 GERAR PDF ATENDIDOS", data=gerar_pdf_bonito(df_at[df_at['id'].isin(sel_at)]), file_name="atendidos.pdf")
-            if c2.button("🗑️ EXCLUIR SELECIONADOS"):
-                with engine.begin() as conn: conn.execute(text("DELETE FROM pedidos WHERE id IN :ids"), {"ids": tuple(sel_at)})
-                st.rerun()
+        st.dataframe(pd.read_sql(text("SELECT * FROM pedidos WHERE status='Atendido'"), engine), use_container_width=True)
 
 elif st.session_state.menu == "Avulsos":
     st.header("📝 Pedidos Avulsos")
-    if 'av_cart' not in st.session_state: st.session_state.av_cart = []
-    
-    with engine.connect() as conn:
-        prods_av = [r[0] for r in conn.execute(text('SELECT nome FROM produtos ORDER BY nome')).fetchall()]
-        
-    f_av = st.text_input("Fornecedor", key="f_av_man")
-    
-    with st.container(border=True):
-        ci, cq = st.columns([3, 1])
-        av_sel = ci.multiselect("Produto", options=prods_av, max_selections=1, key="av_search")
-        produto_av = av_sel[0] if av_sel else ""
-        it_q_av = cq.text_input("Qtd", key="av_q")
-        
-        if st.button("➕ Adicionar Linha", key="btn_av_add"):
-            if produto_av: st.session_state.av_cart.append({"item": produto_av, "qtd": it_q_av}); st.rerun()
-            
-    for i, v in enumerate(st.session_state.av_cart):
-        c1, c2, c3 = st.columns([3, 1, 0.5])
-        v['item'] = c1.text_input(f"Ai_{i}", v['item'])
-        v['qtd'] = c2.text_input(f"Aq_{i}", v['qtd'])
-        if c3.button("❌", key=f"dav_{i}"): st.session_state.av_cart.pop(i); st.rerun()
-        
-    if st.session_state.av_cart:
-        txt_av = ", ".join([f"{x['qtd']}x {x['item']}" for x in st.session_state.av_cart])
-        df_v = pd.DataFrame([{"id": "AV", "loja": "AVULSO", "fornecedor": f_av, "data": datetime.now().strftime("%d/%m/%Y"), "itens": txt_av}])
-        st.download_button("📄 GERAR PDF AVULSO", data=gerar_pdf_bonito(df_v), file_name="avulso.pdf")
-
-elif st.session_state.menu == "Prods":
-    st.header("🍎 Lista de Produtos")
-    np = st.text_input("Novo Produto")
-    if st.button("Salvar Produto"):
-        with engine.begin() as conn: conn.execute(text("INSERT INTO produtos (nome) VALUES (:n)"), {"n": np.upper()})
-        st.rerun()
-    df_p = pd.read_sql(text("SELECT * FROM produtos ORDER BY nome"), engine)
-    if not df_p.empty:
-        df_exp = pd.DataFrame([{"id":"-","loja":"LISTA GERAL","fornecedor":"NIYATI","data":"","itens":", ".join(df_p['nome'].tolist())}])
-        st.download_button("📄 EXPORTAR PDF", data=gerar_pdf_bonito(df_exp), file_name="produtos.pdf")
-        for _, r in df_p.iterrows():
-            c1, c2 = st.columns([4, 1]); c1.write(r['nome'])
-            if c2.button("X", key=f"dp_{r['id']}"):
-                with engine.begin() as conn: conn.execute(text("DELETE FROM produtos WHERE id=:id"), {"id": r['id']})
-                st.rerun()
+    f_av = st.text_input("Fornecedor")
+    it_av = st.text_area("Itens (Ex: 10x Arroz, 5x Feijão)")
+    if st.button("Gerar PDF"):
+        df_v = pd.DataFrame([{"loja": "AVULSO", "fornecedor": f_av, "data": datetime.now().strftime("%d/%m/%Y"), "itens": it_av}])
+        st.download_button("Baixar PDF", data=gerar_pdf(df_v), file_name="avulso.pdf")
 
 elif st.session_state.menu == "Config":
     st.header("🛠️ Configurações")
-    t1, t2 = st.tabs(["🏢 Lojas", "🔐 Logins"])
-    with t1:
-        nl = st.text_input("Nome da Loja")
-        if st.button("Gravar Loja"):
+    tab_l, tab_f, tab_u = st.tabs(["Lojas", "Fornecedores", "Logins"])
+    with tab_l:
+        nl = st.text_input("Nova Loja")
+        if st.button("Salvar Loja"):
             with engine.begin() as conn: conn.execute(text("INSERT INTO lojas (nome) VALUES (:n)"), {"n": nl.upper()})
             st.rerun()
         for _, r in pd.read_sql(text("SELECT * FROM lojas"), engine).iterrows():
-            c1, c2 = st.columns([4,1]); c1.write(r['nome'])
-            if c2.button("X", key=f"dl_{r['id']}"):
-                with engine.begin() as conn: conn.execute(text("DELETE FROM lojas WHERE id=:id"), {"id": r['id']})
+            c1, c2 = st.columns([4, 1]); c1.write(r['nome'])
+            if c2.button("Excluir", key=f"dl_{r['id']}"):
+                with engine.begin() as conn: conn.execute(text("DELETE FROM lojas WHERE id=:id"), {"id": r['id']}); st.rerun()
+    with tab_f:
+        nf = st.text_input("Novo Fornecedor")
+        if st.button("Salvar Fornecedor"):
+            with engine.begin() as conn: conn.execute(text("INSERT INTO fornecedores (nome) VALUES (:n)"), {"n": nf.upper()})
+            st.rerun()
+        for _, r in pd.read_sql(text("SELECT * FROM fornecedores"), engine).iterrows():
+            c1, c2 = st.columns([4, 1]); c1.write(r['nome'])
+            if c2.button("Excluir Forn", key=f"df_{r['id']}"):
+                with engine.begin() as conn: conn.execute(text("DELETE FROM fornecedores WHERE id=:id"), {"id": r['id']}); st.rerun()
+    with tab_u:
+        with st.form("user"):
+            ul, us = st.text_input("Login"), st.text_input("Senha")
+            uv = st.selectbox("Loja", [r[0] for r in engine.connect().execute(text("SELECT nome FROM lojas")).fetchall()])
+            if st.form_submit_button("Criar Login"):
+                with engine.begin() as conn: conn.execute(text("INSERT INTO usuarios (login, senha, nome_loja, nivel_acesso) VALUES (:u,:s,:l,'vendedor')"), {"u": ul, "s": us, "l": uv})
                 st.rerun()
-    with t2:
-        df_u = pd.read_sql(text("SELECT * FROM usuarios"), engine)
-        for _, r in df_u.iterrows():
-            with st.expander(f"Login: {r['login']} (Loja: {r['nome_loja']})"):
-                ns = st.text_input("Senha", r['senha'], key=f"ps_{r['id']}")
-                c1, c2 = st.columns(2)
-                if c1.button("Atualizar", key=f"bu_{r['id']}"):
-                    with engine.begin() as conn: conn.execute(text("UPDATE usuarios SET senha=:s WHERE id=:id"), {"s": ns, "id": r['id']})
-                    st.rerun()
-                if c2.button("Excluir Login", key=f"be_{r['id']}"):
-                    with engine.begin() as conn: conn.execute(text("DELETE FROM usuarios WHERE id=:id"), {"id": r['id']})
-                    st.rerun()
