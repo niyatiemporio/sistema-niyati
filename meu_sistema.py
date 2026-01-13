@@ -246,12 +246,34 @@ elif st.session_state.menu == "Avulsos":
     st.header("📝 Pedidos Avulsos")
     if 'av_cart' not in st.session_state: st.session_state.av_cart = []
     f_av = st.text_input("Fornecedor", key="f_av_man")
-    with st.container(border=True):
-        c1, c2 = st.columns([3, 1])
-        it_av = c1.text_input("Produto")
-        qt_av = c2.text_input("Qtd")
-        if st.button("➕ Adicionar Linha"):
-            if it_av: st.session_state.av_cart.append({"item": it_av, "qtd": qt_av}); st.rerun()
+   with st.container(border=True):
+            ci, cq = st.columns([3, 1])
+            
+            # CAMPO ÚNICO INTELIGENTE (ESTILO GOOGLE)
+            # O usuário pode selecionar da lista ou digitar um novo e apertar ENTER
+            lista_sugestoes = prods if 'prods' in locals() else []
+            
+            p_input = ci.multiselect(
+                "Produto (Busca ou Digita novo + Enter)",
+                options=lista_sugestoes,
+                max_selections=1,
+                placeholder="Comece a digitar o produto...",
+                key=f"search_{st.session_state.loja_atual}"
+            )
+            
+            # Se selecionou da lista, usa o selecionado. Se não, tenta pegar o que foi digitado
+            produto_final = p_input[0] if p_input else ""
+            
+            # Caso o item seja totalmente novo e não esteja na lista de sugestões:
+            if not produto_final:
+                produto_final = ci.text_input("Ou digite o novo item aqui:", key=f"manual_{st.session_state.loja_atual}")
+
+            it_q = cq.text_input("Qtd", key="qt_n")
+            
+            if st.button("➕ Adicionar Linha", key=f"btn_add_{st.session_state.loja_atual}"):
+                if produto_final:
+                    st.session_state[key_c].append({"item": produto_final, "qtd": it_q})
+                    st.rerun()
     for i, v in enumerate(st.session_state.av_cart):
         c1, c2, c3 = st.columns([3, 1, 0.5])
         v['item'] = c1.text_input(f"Ai_{i}", v['item'])
@@ -299,6 +321,7 @@ elif st.session_state.menu == "Config":
                 if c2.button("Excluir Login", key=f"be_{r['id']}"):
                     with engine.begin() as conn: conn.execute(text("DELETE FROM usuarios WHERE id=:id"), {"id": r['id']})
                     st.rerun()
+
 
 
 
