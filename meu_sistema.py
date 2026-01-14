@@ -54,7 +54,6 @@ def navegar(d): st.session_state.menu = d
 st.sidebar.markdown("<h2 style='text-align: center; color: #007bff;'>NIYATI</h2>", unsafe_allow_html=True)
 st.sidebar.info(f"Loja: {st.session_state.loja_atual}")
 
-# Chama o alerta aqui para aparecer na sidebar
 verificar_alertas()
 
 st.sidebar.button("🛒 PEDIDOS", on_click=navegar, args=("Pedidos",), use_container_width=True)
@@ -68,19 +67,24 @@ if st.sidebar.button("🚪 SAIR", use_container_width=True):
     st.session_state.logado = False
     st.rerun()
 
-# --- 5. FUNÇÃO PDF ---
+# --- 5. FUNÇÃO PDF (MODO RETRATO FORÇADO) ---
 def gerar_pdf_bonito(df, titulo="ORDEM DE PEDIDO"):
-    pdf = FPDF()
+    # 'P' define Portrait (Retrato)
+    pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.set_auto_page_break(auto=True, margin=15)
     for _, r in df.iterrows():
         pdf.add_page()
+        # Cabeçalho Azul
         pdf.set_fill_color(0, 51, 102); pdf.set_text_color(255, 255, 255)
         pdf.set_font("Arial", 'B', 16)
         pdf.cell(0, 15, f"LOJA: {str(r['loja']).upper()}", ln=True, align='C', fill=True)
+        # Infos do Pedido
         pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", 'B', 10); pdf.ln(5)
         pdf.cell(95, 8, f"FORNECEDOR: {r['fornecedor']}", border='B')
         pdf.cell(95, 8, f"DATA: {r['data']} | N: {r['id']}", border='B', ln=True, align='R')
-        pdf.ln(5); pdf.set_fill_color(230, 230, 230); pdf.set_font("Arial", 'B', 10)
+        pdf.ln(5)
+        # Tabela
+        pdf.set_fill_color(230, 230, 230); pdf.set_font("Arial", 'B', 10)
         pdf.cell(30, 10, "QTD", border=1, align='C', fill=True)
         pdf.cell(160, 10, "DESCRIÇÃO DO PRODUTO", border=1, align='C', fill=True); pdf.ln()
         pdf.set_font("Arial", '', 10)
@@ -100,8 +104,7 @@ if st.session_state.menu == "Pedidos":
         with engine.connect() as conn:
             forns = [r[0] for r in conn.execute(text('SELECT nome FROM fornecedores ORDER BY nome')).fetchall()]
         
-        # GERENCIAR FORNECEDORES (FIXO AGORA)
-        with st.expander("➕/➖ Adicionar ou Excluir Fornecedores", expanded=False):
+        with st.expander("➕/➖ Gerenciar Fornecedores", expanded=False):
             nf = st.text_input("Nome do Novo Fornecedor")
             if st.button("Gravar Fornecedor", type="primary"):
                 if nf:
@@ -115,8 +118,7 @@ if st.session_state.menu == "Pedidos":
                     st.rerun()
         
         st.divider()
-        f_sel = st.selectbox("Selecione o Fornecedor para o Pedido", forns)
-        
+        f_sel = st.selectbox("Selecione o Fornecedor", forns)
         key_c = f"cart_{st.session_state.loja_atual}_{f_sel}"
         if key_c not in st.session_state: st.session_state[key_c] = []
         
@@ -238,33 +240,44 @@ elif st.session_state.menu == "Avulsos":
     f_av = st.text_input("Fornecedor", key="f_av_man")
     with st.container(border=True):
         c1, c2 = st.columns([3, 1])
-        it_av = c1.text_input("Produto")
-        qt_av = c2.text_input("Qtd")
+        it_av = c1.text_input("Produto", key="av_it_new")
+        qt_av = c2.text_input("Qtd", key="av_qt_new")
         if st.button("➕ Adicionar Linha"):
             if it_av: st.session_state.av_cart.append({"item": it_av, "qtd": qt_av}); st.rerun()
     for i, v in enumerate(st.session_state.av_cart):
-        c1, c2, c3 = st.columns([3, 1, 0.5])
-        v['item'] = c1.text_input(f"Ai_{i}", v['item'])
-        v['qtd'] = c2.text_input(f"Aq_{i}", v['qtd'])
-        if c3.button("❌", key=f"dav_{i}"): st.session_state.av_cart.pop(i); st.rerun()
+        col_it, col_qt, col_del = st.columns([3, 1, 0.5])
+        v['item'] = col_it.text_input(f"Av_It_{i}", v['item'])
+        v['qtd'] = col_qt.text_input(f"Av_Qt_{i}", v['qtd'])
+        if col_del.button("❌", key=f"dav_{i}"): st.session_state.av_cart.pop(i); st.rerun()
     if st.session_state.av_cart:
+        col_pdf, col_atender = st.columns(2)
         txt_av = ", ".join([f"{x['qtd']}x {x['item']}" for x in st.session_state.av_cart])
         df_v = pd.DataFrame([{"id": "AV", "loja": "AVULSO", "fornecedor": f_av, "data": datetime.now().strftime("%d/%m/%Y"), "itens": txt_av}])
-        st.download_button("📄 GERAR PDF AVULSO", data=gerar_pdf_bonito(df_v), file_name="avulso.pdf")
+        col_pdf.download_button("📄 GERAR PDF AVULSO", data=gerar_pdf_bonito(df_v), file_name="avulso.pdf")
+        if col_atender.button("🚀 FINALIZAR E ENVIAR PARA ATENDIDOS", type="primary"):
+            with engine.begin() as conn:
+                conn.execute(text("INSERT INTO pedidos (data, loja, fornecedor, itens, status, tipo) VALUES (:d, 'AVULSO', :f, :i, 'Atendido', 'Normal')"),
+                             {"d": datetime.now().strftime("%d/%m/%Y"), "f": f_av, "i": txt_av})
+            st.session_state.av_cart = []; st.success("Pedido finalizado!"); st.rerun()
 
 elif st.session_state.menu == "Prods":
     st.header("🍎 Lista de Produtos")
     np = st.text_input("Novo Produto")
     if st.button("Salvar Produto"):
-        with engine.begin() as conn: conn.execute(text("INSERT INTO produtos (nome) VALUES (:n)"), {"n": np.upper()}); st.rerun()
+        with engine.begin() as conn: conn.execute(text("INSERT INTO produtos (nome) VALUES (:n)"), {"n": np.upper()})
+        st.rerun()
     df_p = pd.read_sql(text("SELECT * FROM produtos ORDER BY nome"), engine)
     if not df_p.empty:
-        df_exp = pd.DataFrame([{"id":"-","loja":"LISTA GERAL","fornecedor":"NIYATI","data":"","itens":", ".join(df_p['nome'].tolist())}])
+        itens_pdf = ", ".join(df_p['nome'].tolist())
+        df_exp = pd.DataFrame([{"id":"-","loja":"LISTA GERAL","fornecedor":"GERAL","data":datetime.now().strftime("%d/%m/%Y"),"itens": itens_pdf}])
         st.download_button("📄 EXPORTAR PDF", data=gerar_pdf_bonito(df_exp), file_name="produtos.pdf")
+        st.divider()
         for _, r in df_p.iterrows():
-            c1, c2 = st.columns([4, 1]); c1.write(r['nome'])
-            if c2.button("X", key=f"dp_{r['id']}"):
-                with engine.begin() as conn: conn.execute(text("DELETE FROM produtos WHERE id=:id"), {"id": r['id']}); st.rerun()
+            c1, c2 = st.columns([4, 1])
+            c1.write(f"🔹 {r['nome']}")
+            if c2.button("Excluir", key=f"dp_{r['id']}"):
+                with engine.begin() as conn: conn.execute(text("DELETE FROM produtos WHERE id=:id"), {"id": r['id']})
+                st.rerun()
 
 elif st.session_state.menu == "Config":
     st.header("🛠️ Configurações")
@@ -272,11 +285,13 @@ elif st.session_state.menu == "Config":
     with t1:
         nl = st.text_input("Nome da Loja")
         if st.button("Gravar Loja"):
-            with engine.begin() as conn: conn.execute(text("INSERT INTO lojas (nome) VALUES (:n)"), {"n": nl.upper()}); st.rerun()
+            with engine.begin() as conn: conn.execute(text("INSERT INTO lojas (nome) VALUES (:n)"), {"n": nl.upper()})
+            st.rerun()
         for _, r in pd.read_sql(text("SELECT * FROM lojas"), engine).iterrows():
             c1, c2 = st.columns([4,1]); c1.write(r['nome'])
             if c2.button("X", key=f"dl_{r['id']}"):
-                with engine.begin() as conn: conn.execute(text("DELETE FROM lojas WHERE id=:id"), {"id": r['id']}); st.rerun()
+                with engine.begin() as conn: conn.execute(text("DELETE FROM lojas WHERE id=:id"), {"id": r['id']})
+                st.rerun()
     with t2:
         df_u = pd.read_sql(text("SELECT * FROM usuarios"), engine)
         for _, r in df_u.iterrows():
