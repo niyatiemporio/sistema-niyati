@@ -23,7 +23,7 @@ def get_engine():
 
 engine = get_engine()
 
-# --- FUNÇÃO DE CORREÇÃO AUTOMÁTICA (EXECUTA UMA VEZ) ---
+# --- FUNÇÃO DE CORREÇÃO AUTOMÁTICA ---
 def corrigir_tabela_produtos():
     try:
         with engine.begin() as conn:
@@ -108,7 +108,23 @@ if st.session_state.menu == "Pedidos":
         with engine.connect() as conn:
             forns = [r[0] for r in conn.execute(text('SELECT nome FROM fornecedores ORDER BY nome')).fetchall()]
         
-        f_sel = st.selectbox("Selecione o Fornecedor", forns)
+        # --- BLOCO RE-ADICIONADO: GERENCIAR FORNECEDORES ---
+        with st.expander("➕/➖ Adicionar ou Excluir Fornecedores", expanded=False):
+            nf = st.text_input("Nome do Novo Fornecedor")
+            if st.button("Gravar Fornecedor", type="primary"):
+                if nf:
+                    with engine.begin() as conn: conn.execute(text("INSERT INTO fornecedores (nome) VALUES (:n)"), {"n": nf.upper()})
+                    st.rerun()
+            st.divider()
+            for f in forns:
+                cc1, cc2 = st.columns([4, 1])
+                cc1.write(f"🚚 {f}")
+                if cc2.button("X", key=f"del_f_loja_{f}"):
+                    with engine.begin() as conn: conn.execute(text("DELETE FROM fornecedores WHERE nome=:n"), {"n": f})
+                    st.rerun()
+        
+        st.divider()
+        f_sel = st.selectbox("Selecione o Fornecedor para o Pedido", forns)
         key_c = f"cart_{st.session_state.loja_atual}_{f_sel}"
         if key_c not in st.session_state: st.session_state[key_c] = []
         
@@ -152,6 +168,15 @@ if st.session_state.menu == "Pedidos":
                 conn.execute(text("INSERT INTO pedidos (data, loja, fornecedor, itens, tipo) VALUES (:d,:l,'GRANEL',:i,'Granel')"),
                              {"d": datetime.now().strftime("%d/%m/%Y"), "l": st.session_state.loja_atual, "i": txt_g})
             st.session_state.g_cart = []; st.success("Granel Enviado!"); st.rerun()
+
+    with t3:
+        df_h = pd.read_sql(text(f"SELECT * FROM pedidos WHERE loja = '{st.session_state.loja_atual}' ORDER BY id DESC"), engine)
+        for _, r in df_h.iterrows():
+            with st.expander(f"Pedido #{r['id']} - {r['data']} - {r['status']}"):
+                novo_t = st.text_area("Reeditar", r['itens'], key=f"hi_{r['id']}")
+                if st.button("Salvar Alteração", key=f"h_sv_{r['id']}"):
+                    with engine.begin() as conn: conn.execute(text("UPDATE pedidos SET itens=:i WHERE id=:id"), {"i": novo_t, "id": r['id']})
+                    st.rerun()
 
 elif st.session_state.menu == "ADM":
     st.header("⚙️ Gerenciamento ADM")
@@ -272,7 +297,6 @@ elif st.session_state.menu == "Prods":
                 conn.execute(text("INSERT INTO produtos (nome, fornecedor) VALUES (:n, :f)"), {"n": np.upper(), "f": fp})
             st.rerun()
             
-    # --- LISTAGEM SEPARADA POR FORNECEDOR ---
     try:
         df_p = pd.read_sql(text("SELECT * FROM produtos ORDER BY fornecedor, nome"), engine)
         for f in forns:
@@ -285,12 +309,10 @@ elif st.session_state.menu == "Prods":
                         with engine.begin() as conn: conn.execute(text("DELETE FROM produtos WHERE id=:id"), {"id": r['id']})
                         st.rerun()
     except:
-        st.warning("Clique no botão 'CORRIGIR BANCO DE DADOS' na aba Configurações para ativar esta lista.")
+        st.warning("Clique no botão 'CORRIGIR BANCO DE DADOS' na aba Configurações.")
 
 elif st.session_state.menu == "Config":
     st.header("🛠️ Configurações")
-    
-    # BOTÃO DE CORREÇÃO DE EMERGÊNCIA
     if st.button("🔧 CORRIGIR BANCO DE DADOS (CLIQUE AQUI UMA VEZ)", type="secondary"):
         corrigir_tabela_produtos()
         st.rerun()
