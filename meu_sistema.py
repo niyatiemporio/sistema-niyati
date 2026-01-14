@@ -40,7 +40,7 @@ if not st.session_state.logado:
             else: st.error("Login ou Senha incorretos")
     st.stop()
 
-# --- 3. SISTEMA DE ALERTA (BARRA LATERAL) ---
+# --- 3. ALERTA ---
 def verificar_alertas():
     if st.session_state.nivel == 'admin':
         with engine.connect() as conn:
@@ -67,24 +67,19 @@ if st.sidebar.button("🚪 SAIR", use_container_width=True):
     st.session_state.logado = False
     st.rerun()
 
-# --- 5. FUNÇÃO PDF (MODO RETRATO FORÇADO) ---
+# --- 5. FUNÇÃO PDF ---
 def gerar_pdf_bonito(df, titulo="ORDEM DE PEDIDO"):
-    # 'P' define Portrait (Retrato)
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.set_auto_page_break(auto=True, margin=15)
     for _, r in df.iterrows():
         pdf.add_page()
-        # Cabeçalho Azul
         pdf.set_fill_color(0, 51, 102); pdf.set_text_color(255, 255, 255)
         pdf.set_font("Arial", 'B', 16)
         pdf.cell(0, 15, f"LOJA: {str(r['loja']).upper()}", ln=True, align='C', fill=True)
-        # Infos do Pedido
         pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", 'B', 10); pdf.ln(5)
         pdf.cell(95, 8, f"FORNECEDOR: {r['fornecedor']}", border='B')
         pdf.cell(95, 8, f"DATA: {r['data']} | N: {r['id']}", border='B', ln=True, align='R')
-        pdf.ln(5)
-        # Tabela
-        pdf.set_fill_color(230, 230, 230); pdf.set_font("Arial", 'B', 10)
+        pdf.ln(5); pdf.set_fill_color(230, 230, 230); pdf.set_font("Arial", 'B', 10)
         pdf.cell(30, 10, "QTD", border=1, align='C', fill=True)
         pdf.cell(160, 10, "DESCRIÇÃO DO PRODUTO", border=1, align='C', fill=True); pdf.ln()
         pdf.set_font("Arial", '', 10)
@@ -244,11 +239,13 @@ elif st.session_state.menu == "Avulsos":
         qt_av = c2.text_input("Qtd", key="av_qt_new")
         if st.button("➕ Adicionar Linha"):
             if it_av: st.session_state.av_cart.append({"item": it_av, "qtd": qt_av}); st.rerun()
+    
     for i, v in enumerate(st.session_state.av_cart):
         col_it, col_qt, col_del = st.columns([3, 1, 0.5])
         v['item'] = col_it.text_input(f"Av_It_{i}", v['item'])
         v['qtd'] = col_qt.text_input(f"Av_Qt_{i}", v['qtd'])
         if col_del.button("❌", key=f"dav_{i}"): st.session_state.av_cart.pop(i); st.rerun()
+    
     if st.session_state.av_cart:
         col_pdf, col_atender = st.columns(2)
         txt_av = ", ".join([f"{x['qtd']}x {x['item']}" for x in st.session_state.av_cart])
@@ -282,25 +279,54 @@ elif st.session_state.menu == "Prods":
 elif st.session_state.menu == "Config":
     st.header("🛠️ Configurações")
     t1, t2 = st.tabs(["🏢 Lojas", "🔐 Logins"])
+    
     with t1:
         nl = st.text_input("Nome da Loja")
         if st.button("Gravar Loja"):
             with engine.begin() as conn: conn.execute(text("INSERT INTO lojas (nome) VALUES (:n)"), {"n": nl.upper()})
             st.rerun()
-        for _, r in pd.read_sql(text("SELECT * FROM lojas"), engine).iterrows():
+        df_lojas = pd.read_sql(text("SELECT * FROM lojas"), engine)
+        for _, r in df_lojas.iterrows():
             c1, c2 = st.columns([4,1]); c1.write(r['nome'])
             if c2.button("X", key=f"dl_{r['id']}"):
                 with engine.begin() as conn: conn.execute(text("DELETE FROM lojas WHERE id=:id"), {"id": r['id']})
                 st.rerun()
+    
     with t2:
+        st.subheader("🆕 Criar Novo Login")
+        # --- NOVO FORMULÁRIO DE CRIAÇÃO ---
+        with st.form("form_novo_usuario"):
+            c1, c2 = st.columns(2)
+            novo_u = c1.text_input("Login")
+            nova_s = c2.text_input("Senha", type="password")
+            
+            # Busca as lojas cadastradas para o dropdown
+            with engine.connect() as conn:
+                lista_lojas = [r[0] for r in conn.execute(text("SELECT nome FROM lojas ORDER BY nome")).fetchall()]
+            
+            loja_sel = st.selectbox("Atribuir à Loja", options=["ADMIN"] + lista_lojas)
+            nivel_sel = st.selectbox("Nível de Acesso", options=["vendedor", "admin"])
+            
+            if st.form_submit_button("Gerar Acesso"):
+                if novo_u and nova_s:
+                    with engine.begin() as conn:
+                        conn.execute(text("INSERT INTO usuarios (login, senha, nome_loja, nivel_acesso) VALUES (:u, :s, :l, :n)"),
+                                     {"u": novo_u, "s": nova_s, "l": loja_sel, "n": nivel_sel})
+                    st.success(f"Acesso para {novo_u} criado!")
+                    st.rerun()
+                else: st.warning("Preencha todos os campos.")
+
+        st.divider()
+        st.subheader("📋 Gerenciar Acessos Atuais")
         df_u = pd.read_sql(text("SELECT * FROM usuarios"), engine)
         for _, r in df_u.iterrows():
-            with st.expander(f"Login: {r['login']} (Loja: {r['nome_loja']})"):
-                ns = st.text_input("Senha", r['senha'], key=f"ps_{r['id']}")
+            with st.expander(f"👤 {r['login']} (Loja: {r['nome_loja']} | Nível: {r['nivel_acesso']})"):
+                ns = st.text_input("Alterar Senha", r['senha'], key=f"ps_{r['id']}")
                 c1, c2 = st.columns(2)
-                if c1.button("Atualizar", key=f"bu_{r['id']}"):
+                if c1.button("Atualizar Senha", key=f"bu_{r['id']}"):
                     with engine.begin() as conn: conn.execute(text("UPDATE usuarios SET senha=:s WHERE id=:id"), {"s": ns, "id": r['id']})
+                    st.success("Senha atualizada!")
                     st.rerun()
-                if c2.button("Excluir Login", key=f"be_{r['id']}"):
+                if c2.button("❌ Excluir Acesso", key=f"be_{r['id']}"):
                     with engine.begin() as conn: conn.execute(text("DELETE FROM usuarios WHERE id=:id"), {"id": r['id']})
                     st.rerun()
