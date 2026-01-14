@@ -84,10 +84,7 @@ def gerar_pdf_bonito(df, titulo="ORDEM DE PEDIDO"):
         pdf.cell(160, 10, "DESCRIÇÃO DO PRODUTO", border=1, align='C', fill=True); pdf.ln()
         pdf.set_font("Arial", '', 10)
         for it in str(r['itens']).split(", "):
-            if "x " in it:
-                q, n = it.split("x ", 1)
-            else:
-                q, n = "1", it
+            q, n = it.split("x ", 1) if "x " in it else ("1", it)
             pdf.cell(30, 8, q, border=1, align='C')
             pdf.cell(160, 8, f" {n}", border=1); pdf.ln()
     return pdf.output(dest='S').encode('latin-1')
@@ -102,28 +99,41 @@ if st.session_state.menu == "Pedidos":
         with engine.connect() as conn:
             forns = [r[0] for r in conn.execute(text('SELECT nome FROM fornecedores ORDER BY nome')).fetchall()]
         
-        st.write("### Selecione o Fornecedor")
-        f_sel = st.selectbox("", forns, key="f_sel_pedido")
+        # --- BOTÃO RESTAURADO AQUI ---
+        with st.expander("➕/➖ Adicionar ou Excluir Fornecedores", expanded=False):
+            nf = st.text_input("Nome do Novo Fornecedor")
+            if st.button("Gravar Fornecedor", type="primary"):
+                if nf:
+                    with engine.begin() as conn: conn.execute(text("INSERT INTO fornecedores (nome) VALUES (:n)"), {"n": nf.upper()})
+                    st.rerun()
+            st.write("---")
+            for f in forns:
+                cc1, cc2 = st.columns([4, 1])
+                cc1.write(f)
+                if cc2.button("X", key=f"del_f_loja_{f}"):
+                    with engine.begin() as conn: conn.execute(text("DELETE FROM fornecedores WHERE nome=:n"), {"n": f})
+                    st.rerun()
         
+        st.divider()
+        f_sel = st.selectbox("Selecione o Fornecedor", forns)
         key_c = f"cart_{st.session_state.loja_atual}_{f_sel}"
         if key_c not in st.session_state: st.session_state[key_c] = []
         
         with st.container(border=True):
             ci, cq = st.columns([3, 1])
-            it_n = ci.text_input("Produto", key="it_n_ped")
-            it_q = cq.text_input("Qtd", key="qt_n_ped")
-            if st.button("➕ Adicionar Linha", key="btn_add_ped"):
+            it_n = ci.text_input("Produto", key="it_n")
+            it_q = cq.text_input("Qtd", key="qt_n")
+            if st.button("➕ Adicionar Linha"):
                 if it_n: st.session_state[key_c].append({"item": it_n, "qtd": it_q}); st.rerun()
 
-        st.divider()
-        st.write("### Itens no Pedido")
+        st.write("### Itens no Pedido:")
         for i, v in enumerate(st.session_state[key_c]):
             c1, c2, c3 = st.columns([3, 1, 0.5])
-            v['item'] = c1.text_input(f"Produto {i}", v['item'], key=f"ei_{i}_{f_sel}")
-            v['qtd'] = c2.text_input(f"Qtd {i}", v['qtd'], key=f"eq_{i}_{f_sel}")
-            if c3.button("❌", key=f"di_{i}_{f_sel}"): st.session_state[key_c].pop(i); st.rerun()
+            v['item'] = c1.text_input(f"It_{i}", v['item'], key=f"ei_{i}")
+            v['qtd'] = c2.text_input(f"Qt_{i}", v['qtd'], key=f"eq_{i}")
+            if c3.button("❌", key=f"di_{i}"): st.session_state[key_c].pop(i); st.rerun()
         
-        if st.session_state[key_c] and st.button("🚀 ENVIAR PEDIDO", type="primary", key="btn_env_ped"):
+        if st.session_state[key_c] and st.button("🚀 ENVIAR PEDIDO", type="primary"):
             txt = ", ".join([f"{x['qtd']}x {x['item']}" for x in st.session_state[key_c]])
             with engine.begin() as conn:
                 conn.execute(text("INSERT INTO pedidos (data, loja, fornecedor, itens, tipo) VALUES (:d,:l,:f,:i,'Normal')"),
@@ -135,21 +145,19 @@ if st.session_state.menu == "Pedidos":
         if 'g_cart' not in st.session_state: st.session_state.g_cart = []
         with st.container(border=True):
             cg1, cg2 = st.columns([3, 1])
-            git = cg1.text_input("Produto Granel", key="git_granel")
-            gqt = cg2.text_input("Qtd", key="gqt_granel")
-            if st.button("➕ Adicionar Item Granel", key="btn_add_gran"):
+            git = cg1.text_input("Produto Granel", key="git")
+            gqt = cg2.text_input("Qtd", key="gqt")
+            if st.button("➕ Adicionar Item Granel"):
                 if git: st.session_state.g_cart.append({"item": git, "qtd": gqt}); st.rerun()
         
-        st.divider()
-        st.write("### Itens da Lista Granel")
-        # EXIBIÇÃO EM LISTA VERTICAL
+        st.write("### Itens Granel:")
         for i, g in enumerate(st.session_state.g_cart):
             col1, col2, col3 = st.columns([3, 1, 0.5])
-            g['item'] = col1.text_input(f"Item {i}", g['item'], key=f"G_it_{i}")
-            g['qtd'] = col2.text_input(f"Qtd {i}", g['qtd'], key=f"G_qt_{i}")
+            g['item'] = col1.text_input(f"G_it_{i}", g['item'], key=f"edit_g_it_{i}")
+            g['qtd'] = col2.text_input(f"G_qt_{i}", g['qtd'], key=f"edit_g_qt_{i}")
             if col3.button("❌", key=f"dg_{i}"): st.session_state.g_cart.pop(i); st.rerun()
 
-        if st.session_state.g_cart and st.button("Enviar Granel", type="primary", key="btn_env_gran"):
+        if st.session_state.g_cart and st.button("Enviar Granel", type="primary"):
             txt_g = ", ".join([f"{x['qtd']}x {x['item']}" for x in st.session_state.g_cart])
             with engine.begin() as conn:
                 conn.execute(text("INSERT INTO pedidos (data, loja, fornecedor, itens, tipo) VALUES (:d,:l,'GRANEL',:i,'Granel')"),
@@ -160,9 +168,7 @@ if st.session_state.menu == "Pedidos":
         df_h = pd.read_sql(text(f"SELECT * FROM pedidos WHERE loja = '{st.session_state.loja_atual}' ORDER BY id DESC"), engine)
         for _, r in df_h.iterrows():
             with st.expander(f"Pedido #{r['id']} - {r['data']} - {r['status']}"):
-                st.write("**Lista Original:**")
-                st.write(r['itens'])
-                novo_t = st.text_area("Editar para salvar alterações", r['itens'], key=f"hi_{r['id']}")
+                novo_t = st.text_area("Reeditar", r['itens'], key=f"hi_{r['id']}")
                 if st.button("Salvar Alteração", key=f"h_sv_{r['id']}"):
                     with engine.begin() as conn: conn.execute(text("UPDATE pedidos SET itens=:i WHERE id=:id"), {"i": novo_t, "id": r['id']})
                     st.rerun()
@@ -178,11 +184,9 @@ elif st.session_state.menu == "ADM":
             c_sel, c_exp = st.columns([0.1, 0.9])
             if c_sel.checkbox("", key=f"sel_{r['id']}"): sel_ids.append(r['id'])
             with c_exp.expander(f"LOJA: {r['loja']} | Nº: {r['id']} | DATA: {r['data']}"):
-                # MOSTRAR ITENS UM EMBAIXO DO OUTRO NO ADM
                 lista_itens = r['itens'].split(", ")
                 for it in lista_itens:
                     st.markdown(f"• {it}")
-                
                 edit_adm = st.text_area("Editar Pedido", r['itens'], key=f"adm_ed_{r['id']}")
                 c1, c2 = st.columns(2)
                 if c1.button("Salvar", key=f"as_{r['id']}"):
@@ -205,7 +209,6 @@ elif st.session_state.menu == "ADM":
             c_s, c_e = st.columns([0.1, 0.9])
             if c_s.checkbox("", key=f"sg_{r['id']}"): sel_g.append(r['id'])
             with c_e.expander(f"GRANEL: {r['loja']} - {r['data']}"):
-                # MOSTRAR ITENS UM EMBAIXO DO OUTRO NO GRANEL ADM
                 lista_g = r['itens'].split(", ")
                 for item_g in lista_g:
                     st.write(f"• {item_g}")
@@ -239,11 +242,10 @@ elif st.session_state.menu == "Avulsos":
         c1, c2 = st.columns([3, 1])
         it_av = c1.text_input("Produto", key="av_it_new")
         qt_av = c2.text_input("Qtd", key="av_qt_new")
-        if st.button("➕ Adicionar Linha", key="btn_add_avulso"):
+        if st.button("➕ Adicionar Linha"):
             if it_av: st.session_state.av_cart.append({"item": it_av, "qtd": qt_av}); st.rerun()
     
-    st.divider()
-    st.write("### Itens Avulsos")
+    st.write("### Itens Avulsos:")
     for i, v in enumerate(st.session_state.av_cart):
         col_it, col_qt, col_del = st.columns([3, 1, 0.5])
         v['item'] = col_it.text_input(f"Av_It_{i}", v['item'], key=f"edit_av_it_{i}")
