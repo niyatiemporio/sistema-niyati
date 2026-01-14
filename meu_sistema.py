@@ -99,14 +99,12 @@ if st.session_state.menu == "Pedidos":
         with engine.connect() as conn:
             forns = [r[0] for r in conn.execute(text('SELECT nome FROM fornecedores ORDER BY nome')).fetchall()]
         
-        # --- BOTÃO RESTAURADO AQUI ---
         with st.expander("➕/➖ Adicionar ou Excluir Fornecedores", expanded=False):
             nf = st.text_input("Nome do Novo Fornecedor")
             if st.button("Gravar Fornecedor", type="primary"):
                 if nf:
                     with engine.begin() as conn: conn.execute(text("INSERT INTO fornecedores (nome) VALUES (:n)"), {"n": nf.upper()})
                     st.rerun()
-            st.write("---")
             for f in forns:
                 cc1, cc2 = st.columns([4, 1])
                 cc1.write(f)
@@ -126,7 +124,6 @@ if st.session_state.menu == "Pedidos":
             if st.button("➕ Adicionar Linha"):
                 if it_n: st.session_state[key_c].append({"item": it_n, "qtd": it_q}); st.rerun()
 
-        st.write("### Itens no Pedido:")
         for i, v in enumerate(st.session_state[key_c]):
             c1, c2, c3 = st.columns([3, 1, 0.5])
             v['item'] = c1.text_input(f"It_{i}", v['item'], key=f"ei_{i}")
@@ -149,14 +146,11 @@ if st.session_state.menu == "Pedidos":
             gqt = cg2.text_input("Qtd", key="gqt")
             if st.button("➕ Adicionar Item Granel"):
                 if git: st.session_state.g_cart.append({"item": git, "qtd": gqt}); st.rerun()
-        
-        st.write("### Itens Granel:")
         for i, g in enumerate(st.session_state.g_cart):
-            col1, col2, col3 = st.columns([3, 1, 0.5])
-            g['item'] = col1.text_input(f"G_it_{i}", g['item'], key=f"edit_g_it_{i}")
-            g['qtd'] = col2.text_input(f"G_qt_{i}", g['qtd'], key=f"edit_g_qt_{i}")
-            if col3.button("❌", key=f"dg_{i}"): st.session_state.g_cart.pop(i); st.rerun()
-
+            c1, c2, c3 = st.columns([3, 1, 0.5])
+            g['item'] = c1.text_input(f"G_it_{i}", g['item'], key=f"edit_g_it_{i}")
+            g['qtd'] = c2.text_input(f"G_qt_{i}", g['qtd'], key=f"edit_g_qt_{i}")
+            if c3.button("❌", key=f"dg_{i}"): st.session_state.g_cart.pop(i); st.rerun()
         if st.session_state.g_cart and st.button("Enviar Granel", type="primary"):
             txt_g = ", ".join([f"{x['qtd']}x {x['item']}" for x in st.session_state.g_cart])
             with engine.begin() as conn:
@@ -185,8 +179,7 @@ elif st.session_state.menu == "ADM":
             if c_sel.checkbox("", key=f"sel_{r['id']}"): sel_ids.append(r['id'])
             with c_exp.expander(f"LOJA: {r['loja']} | Nº: {r['id']} | DATA: {r['data']}"):
                 lista_itens = r['itens'].split(", ")
-                for it in lista_itens:
-                    st.markdown(f"• {it}")
+                for it in lista_itens: st.markdown(f"• {it}")
                 edit_adm = st.text_area("Editar Pedido", r['itens'], key=f"adm_ed_{r['id']}")
                 c1, c2 = st.columns(2)
                 if c1.button("Salvar", key=f"as_{r['id']}"):
@@ -210,8 +203,7 @@ elif st.session_state.menu == "ADM":
             if c_s.checkbox("", key=f"sg_{r['id']}"): sel_g.append(r['id'])
             with c_e.expander(f"GRANEL: {r['loja']} - {r['data']}"):
                 lista_g = r['itens'].split(", ")
-                for item_g in lista_g:
-                    st.write(f"• {item_g}")
+                for item_g in lista_g: st.write(f"• {item_g}")
         if sel_g:
             c1, c2 = st.columns(2)
             if c1.button("✅ ATENDER GRANEL", type="primary"):
@@ -226,7 +218,18 @@ elif st.session_state.menu == "ADM":
             c_s, c_e = st.columns([0.1, 0.9])
             if c_s.checkbox("", key=f"sat_{r['id']}"): sel_at.append(r['id'])
             with c_e.expander(f"LOJA: {r['loja']} | N: {r['id']} | DATA: {r['data']}"):
-                st.write(r['itens'])
+                # --- ALTERAÇÃO AQUI: LISTA VERTICAL E EDIÇÃO EM ATENDIDOS ---
+                lista_at = r['itens'].split(", ")
+                for item_at in lista_at: st.write(f"• {item_at}")
+                
+                edit_at = st.text_area("Editar Histórico (Opcional)", r['itens'], key=f"at_ed_{r['id']}")
+                col_at1, col_at2 = st.columns(2)
+                if col_at1.button("Salvar Edição", key=f"at_sv_{r['id']}"):
+                    with engine.begin() as conn: conn.execute(text("UPDATE pedidos SET itens=:i WHERE id=:id"), {"i": edit_at, "id": r['id']})
+                    st.rerun()
+                if col_at2.button("Excluir Permanentemente", key=f"dat_{r['id']}"):
+                    with engine.begin() as conn: conn.execute(text("DELETE FROM pedidos WHERE id=:id"), {"id": r['id']})
+                    st.rerun()
         if sel_at:
             c1, c2 = st.columns(2)
             c1.download_button("📄 GERAR PDF ATENDIDOS", data=gerar_pdf_bonito(df_at[df_at['id'].isin(sel_at)]), file_name="atendidos.pdf")
@@ -244,14 +247,11 @@ elif st.session_state.menu == "Avulsos":
         qt_av = c2.text_input("Qtd", key="av_qt_new")
         if st.button("➕ Adicionar Linha"):
             if it_av: st.session_state.av_cart.append({"item": it_av, "qtd": qt_av}); st.rerun()
-    
-    st.write("### Itens Avulsos:")
     for i, v in enumerate(st.session_state.av_cart):
         col_it, col_qt, col_del = st.columns([3, 1, 0.5])
         v['item'] = col_it.text_input(f"Av_It_{i}", v['item'], key=f"edit_av_it_{i}")
         v['qtd'] = col_qt.text_input(f"Av_Qt_{i}", v['qtd'], key=f"edit_av_qt_{i}")
         if col_del.button("❌", key=f"dav_{i}"): st.session_state.av_cart.pop(i); st.rerun()
-    
     if st.session_state.av_cart:
         col_pdf, col_atender = st.columns(2)
         txt_av = ", ".join([f"{x['qtd']}x {x['item']}" for x in st.session_state.av_cart])
@@ -271,8 +271,7 @@ elif st.session_state.menu == "Prods":
         st.rerun()
     df_p = pd.read_sql(text("SELECT * FROM produtos ORDER BY nome"), engine)
     for _, r in df_p.iterrows():
-        c1, c2 = st.columns([4, 1])
-        c1.write(f"🔹 {r['nome']}")
+        c1, c2 = st.columns([4, 1]); c1.write(f"🔹 {r['nome']}")
         if c2.button("Excluir", key=f"dp_{r['id']}"):
             with engine.begin() as conn: conn.execute(text("DELETE FROM produtos WHERE id=:id"), {"id": r['id']})
             st.rerun()
@@ -296,8 +295,7 @@ elif st.session_state.menu == "Config":
             c1, c2 = st.columns(2)
             novo_u = c1.text_input("Login")
             nova_s = c2.text_input("Senha", type="password")
-            with engine.connect() as conn:
-                lista_lojas = [r[0] for r in conn.execute(text("SELECT nome FROM lojas ORDER BY nome")).fetchall()]
+            with engine.connect() as conn: lista_lojas = [r[0] for r in conn.execute(text("SELECT nome FROM lojas ORDER BY nome")).fetchall()]
             loja_sel = st.selectbox("Atribuir à Loja", options=["ADMIN"] + lista_lojas)
             nivel_sel = st.selectbox("Nível de Acesso", options=["vendedor", "admin"])
             if st.form_submit_button("Gerar Acesso"):
@@ -305,8 +303,7 @@ elif st.session_state.menu == "Config":
                     with engine.begin() as conn:
                         conn.execute(text("INSERT INTO usuarios (login, senha, nome_loja, nivel_acesso) VALUES (:u, :s, :l, :n)"),
                                      {"u": novo_u, "s": nova_s, "l": loja_sel, "n": nivel_sel})
-                    st.success(f"Acesso para {novo_u} criado!")
-                    st.rerun()
+                    st.success(f"Acesso para {novo_u} criado!"); st.rerun()
         st.divider()
         df_u = pd.read_sql(text("SELECT * FROM usuarios"), engine)
         for _, r in df_u.iterrows():
