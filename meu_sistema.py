@@ -218,21 +218,19 @@ elif st.session_state.menu == "ADM":
             c_s, c_e = st.columns([0.1, 0.9])
             if c_s.checkbox("", key=f"sat_{r['id']}"): sel_at.append(r['id'])
             with c_e.expander(f"LOJA: {r['loja']} | N: {r['id']} | DATA: {r['data']}"):
-                # --- ALTERAÇÃO AQUI: LISTA VERTICAL E EDIÇÃO EM ATENDIDOS ---
                 lista_at = r['itens'].split(", ")
                 for item_at in lista_at: st.write(f"• {item_at}")
-                
-                edit_at = st.text_area("Editar Histórico (Opcional)", r['itens'], key=f"at_ed_{r['id']}")
+                edit_at = st.text_area("Editar Histórico", r['itens'], key=f"at_ed_{r['id']}")
                 col_at1, col_at2 = st.columns(2)
                 if col_at1.button("Salvar Edição", key=f"at_sv_{r['id']}"):
                     with engine.begin() as conn: conn.execute(text("UPDATE pedidos SET itens=:i WHERE id=:id"), {"i": edit_at, "id": r['id']})
                     st.rerun()
-                if col_at2.button("Excluir Permanentemente", key=f"dat_{r['id']}"):
+                if col_at2.button("Excluir", key=f"dat_{r['id']}"):
                     with engine.begin() as conn: conn.execute(text("DELETE FROM pedidos WHERE id=:id"), {"id": r['id']})
                     st.rerun()
         if sel_at:
             c1, c2 = st.columns(2)
-            c1.download_button("📄 GERAR PDF ATENDIDOS", data=gerar_pdf_bonito(df_at[df_at['id'].isin(sel_at)]), file_name="atendidos.pdf")
+            c1.download_button("📄 GERAR PDF", data=gerar_pdf_bonito(df_at[df_at['id'].isin(sel_at)]), file_name="atendidos.pdf")
             if c2.button("🗑️ EXCLUIR SELECIONADOS"):
                 with engine.begin() as conn: conn.execute(text("DELETE FROM pedidos WHERE id IN :ids"), {"ids": tuple(sel_at)})
                 st.rerun()
@@ -240,18 +238,32 @@ elif st.session_state.menu == "ADM":
 elif st.session_state.menu == "Avulsos":
     st.header("📝 Pedidos Avulsos")
     if 'av_cart' not in st.session_state: st.session_state.av_cart = []
+    
+    # --- BUSCA E DIGITAÇÃO EM AVULSOS ---
     f_av = st.text_input("Fornecedor", key="f_av_man")
+    with engine.connect() as conn:
+        lista_prods = [r[0] for r in conn.execute(text('SELECT nome FROM produtos ORDER BY nome')).fetchall()]
+    
     with st.container(border=True):
-        c1, c2 = st.columns([3, 1])
-        it_av = c1.text_input("Produto", key="av_it_new")
-        qt_av = c2.text_input("Qtd", key="av_qt_new")
-        if st.button("➕ Adicionar Linha"):
-            if it_av: st.session_state.av_cart.append({"item": it_av, "qtd": qt_av}); st.rerun()
+        st.write("### Adicionar Item")
+        col_bus, col_dig, col_q = st.columns([2, 2, 1])
+        it_bus = col_bus.selectbox("Buscar Produto", [""] + lista_prods, key="bus_av")
+        it_dig = col_dig.text_input("Ou Digite o Produto", key="dig_av")
+        qt_av = col_q.text_input("Qtd", key="av_qt_new")
+        
+        if st.button("➕ Adicionar à Lista"):
+            final_it = it_bus if it_bus != "" else it_dig
+            if final_it:
+                st.session_state.av_cart.append({"item": final_it, "qtd": qt_av})
+                st.rerun()
+    
+    st.write("### Itens no Pedido Avulso:")
     for i, v in enumerate(st.session_state.av_cart):
         col_it, col_qt, col_del = st.columns([3, 1, 0.5])
         v['item'] = col_it.text_input(f"Av_It_{i}", v['item'], key=f"edit_av_it_{i}")
         v['qtd'] = col_qt.text_input(f"Av_Qt_{i}", v['qtd'], key=f"edit_av_qt_{i}")
         if col_del.button("❌", key=f"dav_{i}"): st.session_state.av_cart.pop(i); st.rerun()
+    
     if st.session_state.av_cart:
         col_pdf, col_atender = st.columns(2)
         txt_av = ", ".join([f"{x['qtd']}x {x['item']}" for x in st.session_state.av_cart])
@@ -265,16 +277,29 @@ elif st.session_state.menu == "Avulsos":
 
 elif st.session_state.menu == "Prods":
     st.header("🍎 Lista de Produtos")
-    np = st.text_input("Novo Produto")
-    if st.button("Salvar Produto"):
-        with engine.begin() as conn: conn.execute(text("INSERT INTO produtos (nome) VALUES (:n)"), {"n": np.upper()})
-        st.rerun()
-    df_p = pd.read_sql(text("SELECT * FROM produtos ORDER BY nome"), engine)
-    for _, r in df_p.iterrows():
-        c1, c2 = st.columns([4, 1]); c1.write(f"🔹 {r['nome']}")
-        if c2.button("Excluir", key=f"dp_{r['id']}"):
-            with engine.begin() as conn: conn.execute(text("DELETE FROM produtos WHERE id=:id"), {"id": r['id']})
+    with engine.connect() as conn:
+        forns = [r[0] for r in conn.execute(text('SELECT nome FROM fornecedores ORDER BY nome')).fetchall()]
+    
+    with st.form("add_prod"):
+        c1, c2 = st.columns([2,1])
+        np = c1.text_input("Novo Produto")
+        fp = c2.selectbox("Fornecedor", forns)
+        if st.form_submit_button("Salvar Produto"):
+            with engine.begin() as conn: 
+                conn.execute(text("INSERT INTO produtos (nome, fornecedor) VALUES (:n, :f)"), {"n": np.upper(), "f": fp})
             st.rerun()
+            
+    # --- LISTAGEM SEPARADA POR FORNECEDOR ---
+    df_p = pd.read_sql(text("SELECT * FROM produtos ORDER BY fornecedor, nome"), engine)
+    for f in forns:
+        with st.expander(f"📦 PRODUTOS: {f}"):
+            df_f = df_p[df_p['fornecedor'] == f]
+            for _, r in df_f.iterrows():
+                c1, c2 = st.columns([4, 1])
+                c1.write(f"🔹 {r['nome']}")
+                if c2.button("Excluir", key=f"dp_{r['id']}"):
+                    with engine.begin() as conn: conn.execute(text("DELETE FROM produtos WHERE id=:id"), {"id": r['id']})
+                    st.rerun()
 
 elif st.session_state.menu == "Config":
     st.header("🛠️ Configurações")
